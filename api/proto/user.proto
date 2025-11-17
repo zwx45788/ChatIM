@@ -1,0 +1,21 @@
+    // user.proto
+    syntax = "proto3";
+
+    package user;
+
+    option go_package = "ChatIM/api/gen/go/user";
+
+    service UserService {
+      rpc GetUserByID (GetUserRequest) returns (GetUserResponse);
+    }
+
+    message GetUserRequest {
+      string id = 1;
+    }
+
+    message GetUserResponse {
+      string id = 1;
+      string username = 2;
+      string nickname = 3;
+    }
+    
