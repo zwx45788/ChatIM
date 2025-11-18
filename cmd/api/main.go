@@ -26,7 +26,7 @@ func main() {
 	{
 		api.GET("/users/:id", userHandler.GetUserByID)
 		// 以后可以添加更多路由，比如：
-		// api.POST("/users", userHandler.CreateUser)
+		api.POST("/users", userHandler.CreateUser)
 	}
 
 	// 启动 HTTP 服务器

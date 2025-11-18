@@ -1,21 +1,35 @@
-    // user.proto
-    syntax = "proto3";
+syntax = "proto3";
 
-    package user;
+package user;
+option go_package = "ChatIM/api/proto/user";
 
-    option go_package = "ChatIM/api/gen/go/user";
+// 获取用户信息的请求
+message GetUserRequest {
+  string id = 1;
+}
 
-    service UserService {
-      rpc GetUserByID (GetUserRequest) returns (GetUserResponse);
-    }
+// 获取用户信息的响应
+message GetUserResponse {
+  string id = 1;
+  string username = 2;
+  string nickname = 3;
+}
 
-    message GetUserRequest {
-      string id = 1;
-    }
+// 创建用户的请求
+message CreateUserRequest {
+  string username = 1;
+  string password = 2;
+  string nickname = 3;
+}
 
-    message GetUserResponse {
-      string id = 1;
-      string username = 2;
-      string nickname = 3;
-    }
-    
+// 创建用户的响应
+message CreateUserResponse {
+  int32 code = 1;        // 0 表示成功，-1 表示用户名已存在等
+  string message = 2;     // 返回给前端的提示信息
+  string user_id = 3;     // 如果成功，返回新创建用户的ID
+}
+
+service UserService {
+  rpc GetUserByID (GetUserRequest) returns (GetUserResponse) {}
+  rpc CreateUser (CreateUserRequest) returns (CreateUserResponse);
+}
