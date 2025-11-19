@@ -1,35 +1,67 @@
 syntax = "proto3";
 
 package user;
-option go_package = "ChatIM/api/proto/user";
 
-// 获取用户信息的请求
+option go_package = "github.com/your-username/your-project/api/proto/user";
+
+service UserService {
+  rpc GetUserByID (GetUserRequest) returns (GetUserResponse) {}
+  rpc CreateUser (CreateUserRequest) returns (CreateUserResponse);
+  rpc Login (LoginRequest) returns (LoginResponse); // 👈 新增登录方法
+  rpc GetCurrentUser (GetCurrentUserRequest) returns (GetCurrentUserResponse);
+  rpc CheckUserOnline (CheckUserOnlineRequest) returns (CheckUserOnlineResponse);
+}
+
 message GetUserRequest {
   string id = 1;
 }
 
-// 获取用户信息的响应
 message GetUserResponse {
   string id = 1;
   string username = 2;
   string nickname = 3;
 }
 
-// 创建用户的请求
 message CreateUserRequest {
   string username = 1;
   string password = 2;
   string nickname = 3;
 }
 
-// 创建用户的响应
 message CreateUserResponse {
-  int32 code = 1;        // 0 表示成功，-1 表示用户名已存在等
-  string message = 2;     // 返回给前端的提示信息
-  string user_id = 3;     // 如果成功，返回新创建用户的ID
+  int32 code = 1;
+  string message = 2;
+  string user_id = 3;
 }
 
-service UserService {
-  rpc GetUserByID (GetUserRequest) returns (GetUserResponse) {}
-  rpc CreateUser (CreateUserRequest) returns (CreateUserResponse);
+// 👇 新增的登录相关消息
+message LoginRequest {
+  string username = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  int32 code = 1;        // 0 成功, -1 失败
+  string message = 2;     // 提示信息
+  string token = 3;      // JWT Token, 如果成功
+}
+message GetCurrentUserRequest {
+}
+
+message GetCurrentUserResponse {
+  int32 code = 1;
+  string message = 2;
+  string user_id = 3;
+  string username = 4;
+  string nickname = 5;
+}
+message CheckUserOnlineRequest {
+  string user_id = 1;
+}
+
+// 👇 新增对应的响应
+message CheckUserOnlineResponse {
+  int32 code = 1;
+  string message = 2;
+  bool is_online = 3; // 核心信息：是否在线
 }

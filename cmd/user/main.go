@@ -4,8 +4,9 @@ package main
 
 import (
 	pb "ChatIM/api/proto/user"
-	"ChatIM/internal/user_service/handler"
-	"ChatIM/pkg" // 导入 database/sql
+	"ChatIM/internal/user_service/handler" // 导入 database/sql
+	"ChatIM/pkg"
+	"context"
 	"log"
 	"net"
 
@@ -13,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/go-sql-driver/mysql" // 匿名导入 MySQL 驱动
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 )
 
@@ -24,9 +26,18 @@ func main() {
 	}
 	// 确保在程序退出时关闭数据库连接
 	defer db.Close()
-
+	rdb := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379", // 因为我们用 Docker 启动了 Redis
+	})
+	// 验证 Redis 连接
+	ctx := context.Background()
+	_, err = rdb.Ping(ctx).Result()
+	if err != nil {
+		log.Fatalf("Failed to connect to Redis: %v", err)
+	}
+	log.Println("Successfully connected to Redis")
 	// 2. 【修改】将数据库连接传递给 handler
-	userHandler := handler.NewUserHandler(db)
+	userHandler := handler.NewUserHandler(db, rdb)
 
 	// 3. 启动 gRPC 服务
 	grpcSrv := grpc.NewServer()

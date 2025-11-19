@@ -4,10 +4,11 @@ import (
 	"net/http"
 
 	pb "ChatIM/api/proto/user"
+	"ChatIM/internal/api_gateway/middleware"
 
 	"github.com/gin-gonic/gin"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 type UserGatewayHandler struct {
@@ -15,17 +16,19 @@ type UserGatewayHandler struct {
 }
 
 func NewUserGatewayHandler() (*UserGatewayHandler, error) {
-	conn, err := grpc.Dial("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// ... (gRPC 连接代码保持不变) ...
+	// 为了完整，我把它也写在这里
+	conn, err := grpc.Dial("localhost:50051", grpc.WithInsecure())
 	if err != nil {
 		return nil, err
 	}
-	client := pb.NewUserServiceClient(conn)
+	userClient := pb.NewUserServiceClient(conn)
+
 	return &UserGatewayHandler{
-		userClient: client,
+		userClient: userClient,
 	}, nil
 }
 
-// GetUserByID 处理 GET /api/v1/users/:id 的请求
 func (h *UserGatewayHandler) GetUserByID(c *gin.Context) {
 	userID := c.Param("id")
 	res, err := h.userClient.GetUserByID(c.Request.Context(), &pb.GetUserRequest{Id: userID})
@@ -33,6 +36,7 @@ func (h *UserGatewayHandler) GetUserByID(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
 		"msg":  "success",
@@ -40,7 +44,6 @@ func (h *UserGatewayHandler) GetUserByID(c *gin.Context) {
 	})
 }
 
-// CreateUser 处理 POST /api/v1/users 的请求
 func (h *UserGatewayHandler) CreateUser(c *gin.Context) {
 	var req pb.CreateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -54,7 +57,7 @@ func (h *UserGatewayHandler) CreateUser(c *gin.Context) {
 		return
 	}
 
-	statusCode := http.StatusCreated
+	statusCode := http.StatusOK
 	if res.Code != 0 {
 		statusCode = http.StatusBadRequest
 	}
@@ -62,6 +65,95 @@ func (h *UserGatewayHandler) CreateUser(c *gin.Context) {
 	c.JSON(statusCode, gin.H{
 		"code":    res.Code,
 		"message": res.Message,
-		"data":    gin.H{"user_id": res.UserId},
+		"user_id": res.UserId,
+	})
+}
+
+// Login 处理 POST /api/v1/login 的请求
+func (h *UserGatewayHandler) Login(c *gin.Context) {
+	var req pb.LoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+		return
+	}
+
+	res, err := h.userClient.Login(c.Request.Context(), &req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to login: " + err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusUnauthorized // 401
+	}
+
+	c.JSON(statusCode, gin.H{
+		"code":    res.Code,
+		"message": res.Message,
+		"token":   res.Token, // 返回 token
+	})
+}
+func (h *UserGatewayHandler) GetCurrentUser(c *gin.Context) {
+	userID, exists := middleware.GetUserIDFromContext(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User ID not found in context"})
+		return
+	}
+
+	// 👇 核心改动：创建一个新的 context，并将 userID 放入 gRPC Metadata
+	// Metadata 的 key 通常用小写，并用 - 连接
+	md := metadata.New(map[string]string{"user-id": userID})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	// 👇 使用这个带有 Metadata 的新 context 来调用 gRPC
+	res, err := h.userClient.GetCurrentUser(ctx, &pb.GetCurrentUserRequest{})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get current user: " + err.Error()})
+		return
+	}
+
+	// ... (后续的响应逻辑保持不变) ...
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusBadRequest
+	}
+
+	c.JSON(statusCode, gin.H{
+		"code":    res.Code,
+		"message": res.Message,
+		"data": map[string]string{
+			"user_id":  res.UserId,
+			"username": res.Username,
+			"nickname": res.Nickname,
+		},
+	})
+}
+func (h *UserGatewayHandler) CheckUserOnline(c *gin.Context) {
+	// 👇 从 URL 路径参数中获取 user_id
+	userID := c.Param("user_id")
+	if userID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "user_id is required"})
+		return
+	}
+
+	// 调用 gRPC 服务
+	res, err := h.userClient.CheckUserOnline(c.Request.Context(), &pb.CheckUserOnlineRequest{
+		UserId: userID,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check user online status: " + err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+
+	c.JSON(statusCode, gin.H{
+		"code":      res.Code,
+		"message":   res.Message,
+		"is_online": res.IsOnline,
 	})
 }
