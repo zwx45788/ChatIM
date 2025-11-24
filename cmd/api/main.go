@@ -30,6 +30,7 @@ func main() {
 			protected.GET("/users/me", userHandler.GetCurrentUser) // 👈 获取当前用户信息
 			// 以后其他需要认证的路由都加在这里
 			// protected.PUT("/users/me", userHandler.UpdateCurrentUser)
+			protected.POST("/messages/send", userHandler.SendMessage)
 		}
 	}
 

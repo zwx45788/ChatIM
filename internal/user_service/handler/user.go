@@ -8,7 +8,7 @@ import (
 	"time"
 
 	pb "ChatIM/api/proto/user"
-	"ChatIM/internal/utils"
+	"ChatIM/pkg/auth"
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
@@ -113,15 +113,23 @@ func (h *UserHandler) Login(ctx context.Context, req *pb.LoginRequest) (*pb.Logi
 	}
 
 	// 3. 密码正确，生成真实的 JWT
-	tokenString, err := utils.GenerateToken(userID) // 👈 调用工具包生成 Token
+	tokenString, err := auth.GenerateToken(userID) // 👈 调用工具包生成 Token
 	if err != nil {
 		log.Printf("Failed to generate token for user %s: %v", req.Username, err)
 		return nil, fmt.Errorf("failed to generate token")
 	}
+	// 4. 将用户状态写入 Redis (在线状态)
 	err = h.redis.Set(ctx, "online_status:"+userID, "1", 24*time.Hour).Err()
 	if err != nil {
 		// Redis 写入失败不应该影响登录，但应该记录日志
 		log.Printf("Warning: failed to set user online status in Redis for user %s: %v", userID, err)
+	}
+	// 👇 5. 新增：将 username -> user_id 的映射写入 Redis
+	// 这个缓存可以设置得更久，比如 7 天
+	usernameKey := "user_id_by_username:" + req.Username
+	err = h.redis.Set(ctx, usernameKey, userID, 7*24*time.Hour).Err()
+	if err != nil {
+		log.Printf("Warning: failed to cache username->userID mapping in Redis: %v", err)
 	}
 	log.Printf("User %s logged in successfully", req.Username)
 
@@ -178,11 +186,38 @@ func (h *UserHandler) GetCurrentUser(ctx context.Context, req *pb.GetCurrentUser
 func (h *UserHandler) CheckUserOnline(ctx context.Context, req *pb.CheckUserOnlineRequest) (*pb.CheckUserOnlineResponse, error) {
 	log.Printf("Received request to check online status for user_id: %s", req.UserId)
 
-	// 👇 核心逻辑：从 Redis 中查询 key 是否存在
-	key := "online_status:" + req.UserId
-	result, err := h.redis.Exists(ctx, key).Result()
+	var targetUserID string
+	if len(req.UserId) > 30 { // 简单粗暴地判断为 UUID
+		targetUserID = req.UserId
+	} else { // 否则认为是 username
+		// 从 Redis 缓存中查询 user_id
+		usernameKey := "user_id_by_username:" + req.UserId
+		cachedUserID, err := h.redis.Get(ctx, usernameKey).Result()
+		if err == redis.Nil {
+			// 缓存里没有，说明用户可能从未登录过，或者缓存过期了
+			log.Printf("Username '%s' not found in cache.", req.UserId)
+			return &pb.CheckUserOnlineResponse{
+				Code:     0,
+				Message:  "查询成功",
+				IsOnline: false,
+			}, nil
+		} else if err != nil {
+			// Redis 查询出错
+			log.Printf("Error checking username in Redis: %v", err)
+			return &pb.CheckUserOnlineResponse{
+				Code:     -1,
+				Message:  "服务内部错误",
+				IsOnline: false,
+			}, nil
+		}
+		targetUserID = cachedUserID
+	}
+
+	// 现在 targetUserID 已经是我们要查询的 UUID 了
+	log.Printf("Checking online status for user_id: %s", targetUserID)
+	onlineKey := "online_status:" + targetUserID
+	result, err := h.redis.Exists(ctx, onlineKey).Result()
 	if err != nil {
-		// Redis 查询出错
 		log.Printf("Error checking user online status in Redis: %v", err)
 		return &pb.CheckUserOnlineResponse{
 			Code:     -1,
@@ -191,10 +226,8 @@ func (h *UserHandler) CheckUserOnline(ctx context.Context, req *pb.CheckUserOnli
 		}, nil
 	}
 
-	// Redis 的 Exists 命令：如果 key 存在，返回 1；否则返回 0
 	isOnline := result == 1
-
-	log.Printf("User %s is online: %t", req.UserId, isOnline)
+	log.Printf("User %s is online: %t", targetUserID, isOnline)
 
 	return &pb.CheckUserOnlineResponse{
 		Code:     0,

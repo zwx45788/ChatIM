@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package proto.message;
+
+option go_package = "github.com/your-username/your-project/api/proto/message";
+
+// 定义消息数据结构
+message Message {
+  string id = 1;          // 消息唯一ID (UUID)
+  string from_user_id = 2; // 发送者ID
+  string to_user_id = 3;   // 接收者ID (私聊场景)
+  string content = 4;      // 消息内容
+  int64 created_at = 5;    // 创建时间 (Unix时间戳)
+}
+
+// 发送消息的请求
+message SendMessageRequest {
+  string to_user_id = 1;   // 发送给谁
+  string content = 2;      // 消息内容
+}
+
+// 发送消息的响应
+message SendMessageResponse {
+  int32 code = 1;
+  string message = 2;
+  Message msg = 3; // 返回成功存储的消息详情
+}
+//拉取消息的请求
+message PullMessagesRequest{
+  int64 limit = 1;
+  int64 offset = 2;
+}
+//拉取消息的响应
+message PullMessagesResponse{
+  int32 code = 1;
+  string message = 2;
+  repeated Message msgs = 3;
+}
+// 定义消息服务
+service MessageService {
+  // 发送一条私聊消息
+  rpc SendMessage (SendMessageRequest) returns (SendMessageResponse);
+  //拉取消息
+  rpc PullMessages (PullMessagesRequest) returns (PullMessagesResponse);
+}

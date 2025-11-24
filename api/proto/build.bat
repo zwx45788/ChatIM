@@ -1,1 +1,2 @@
 protoc --go_out=./user --go_opt=paths=source_relative --go-grpc_out=./user --go-grpc_opt=paths=source_relative  user.proto
+protoc --go_out=./message --go_opt=paths=source_relative --go-grpc_out=./message --go-grpc_opt=paths=source_relative  message.proto

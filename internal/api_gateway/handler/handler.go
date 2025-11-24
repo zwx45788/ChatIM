@@ -3,29 +3,38 @@ package handler
 import (
 	"net/http"
 
+	msgPb "ChatIM/api/proto/message"
 	pb "ChatIM/api/proto/user"
 	"ChatIM/internal/api_gateway/middleware"
 
 	"github.com/gin-gonic/gin"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 )
 
 type UserGatewayHandler struct {
-	userClient pb.UserServiceClient
+	userClient    pb.UserServiceClient
+	messageClient msgPb.MessageServiceClient
 }
 
 func NewUserGatewayHandler() (*UserGatewayHandler, error) {
 	// ... (gRPC 连接代码保持不变) ...
 	// 为了完整，我把它也写在这里
-	conn, err := grpc.Dial("localhost:50051", grpc.WithInsecure())
+	userConn, err := grpc.Dial("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, err
 	}
-	userClient := pb.NewUserServiceClient(conn)
+
+	// 👇 新增：连接到 message-service
+	msgConn, err := grpc.Dial("localhost:50052", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return nil, err
+	}
 
 	return &UserGatewayHandler{
-		userClient: userClient,
+		userClient:    pb.NewUserServiceClient(userConn),
+		messageClient: msgPb.NewMessageServiceClient(msgConn), // 👈 初始化客户端
 	}, nil
 }
 
@@ -156,4 +165,39 @@ func (h *UserGatewayHandler) CheckUserOnline(c *gin.Context) {
 		"message":   res.Message,
 		"is_online": res.IsOnline,
 	})
+}
+
+// SendMessage 发送消息的 HTTP 处理函数
+func (h *UserGatewayHandler) SendMessage(c *gin.Context) {
+	var req msgPb.SendMessageRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 👇 1. 从 HTTP Header 中获取完整的 Authorization Token
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	// 👇 2. 创建 gRPC metadata，key 必须是 "authorization"
+	//    value 就是完整的 Token 字符串
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	// 👇 3. 使用这个带 metadata 的新上下文进行 gRPC 调用
+	res, err := h.messageClient.SendMessage(ctx, &req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+
+	c.JSON(statusCode, res)
 }

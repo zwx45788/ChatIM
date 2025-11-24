@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"ChatIM/internal/utils"
+	"ChatIM/pkg/auth"
 
 	"github.com/gin-gonic/gin"
 )
@@ -34,7 +34,7 @@ func AuthMiddleware() gin.HandlerFunc {
 
 		// 3. 解析 Token
 		tokenString := parts[1]
-		claims, err := utils.ParseToken(tokenString)
+		claims, err := auth.ParseToken(tokenString)
 		if err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
 			c.Abort()
