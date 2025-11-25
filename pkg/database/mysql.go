@@ -1,24 +1,25 @@
+// pkg/database/mysql.go
 package database
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
 
-	_ "github.com/go-sql-driver/mysql" // 注意这里的匿名导入
+	_ "github.com/go-sql-driver/mysql"
 )
 
-func InitDB() (*sql.DB, error) {
-	dsn := "root:060629@tcp(127.0.0.1:3306)/chatim?charset=utf8mb4&parseTime=True&loc=Local"
+// InitDB 初始化数据库连接
+func InitDB(dsn string) (*sql.DB, error) {
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	err = db.Ping()
-	if err != nil {
-		return nil, err
+	if err = db.Ping(); err != nil {
+		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	log.Println("Successfully connected to the MySQL database!")
+	log.Println("Database connection established successfully")
 	return db, nil
 }

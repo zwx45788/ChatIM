@@ -1,0 +1,15 @@
+server:
+  api_port: ":8080"
+  user_grpc_port: ":50051"
+  message_grpc_port: ":50052"
+
+database:
+  mysql:
+    dsn: "root:060629@tcp(127.0.0.1:3306)/chatim?charset=utf8mb4&parseTime=True&loc=Local"
+  redis:
+    addr: "localhost:6379"
+    password: ""
+    db: 0
+
+jwt:
+  secret: "your-super-secret-key-change-this-in-production"

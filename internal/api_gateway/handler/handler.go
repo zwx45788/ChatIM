@@ -1,11 +1,14 @@
 package handler
 
 import (
+	"log"
 	"net/http"
+	"strconv"
 
 	msgPb "ChatIM/api/proto/message"
 	pb "ChatIM/api/proto/user"
 	"ChatIM/internal/api_gateway/middleware"
+	"ChatIM/pkg/config"
 
 	"github.com/gin-gonic/gin"
 	"google.golang.org/grpc"
@@ -19,22 +22,31 @@ type UserGatewayHandler struct {
 }
 
 func NewUserGatewayHandler() (*UserGatewayHandler, error) {
-	// ... (gRPC 连接代码保持不变) ...
-	// 为了完整，我把它也写在这里
-	userConn, err := grpc.Dial("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// 👇 2. 在这里加载配置
+	cfg, err := config.LoadConfig()
 	if err != nil {
+		log.Printf("Failed to load config in handler: %v", err)
 		return nil, err
 	}
 
-	// 👇 新增：连接到 message-service
-	msgConn, err := grpc.Dial("localhost:50052", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// 👇 3. 使用配置中的地址创建连接
+	// 连接到 user-service
+	userConn, err := grpc.Dial("127.0.0.1"+cfg.Server.UserGRPCPort, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
+		log.Printf("did not connect to user service: %v", err)
+		return nil, err
+	}
+
+	// 连接到 message-service
+	msgConn, err := grpc.Dial("127.0.0.1"+cfg.Server.MessageGRPCPort, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Printf("did not connect to message service: %v", err)
 		return nil, err
 	}
 
 	return &UserGatewayHandler{
 		userClient:    pb.NewUserServiceClient(userConn),
-		messageClient: msgPb.NewMessageServiceClient(msgConn), // 👈 初始化客户端
+		messageClient: msgPb.NewMessageServiceClient(msgConn),
 	}, nil
 }
 
@@ -194,6 +206,45 @@ func (h *UserGatewayHandler) SendMessage(c *gin.Context) {
 		return
 	}
 
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+
+	c.JSON(statusCode, res)
+}
+func (h *UserGatewayHandler) PullMessage(c *gin.Context) {
+	limitStr := c.DefaultQuery("limit", "20")
+	offsetStr := c.DefaultQuery("offset", "0")
+	limit, err := strconv.ParseInt(limitStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit parameter"})
+		return
+	}
+	offset, err := strconv.ParseInt(offsetStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid offset parameter"})
+		return
+	}
+	//检验token
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+	req := &msgPb.PullMessagesRequest{
+		Limit:  limit,
+		Offset: offset,
+	}
+	res, err := h.messageClient.PullMessages(ctx, req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 👇 5. 返回响应
 	statusCode := http.StatusOK
 	if res.Code != 0 {
 		statusCode = http.StatusInternalServerError

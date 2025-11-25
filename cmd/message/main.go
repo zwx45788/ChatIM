@@ -1,6 +1,7 @@
 package main
 
 import (
+	"ChatIM/pkg/config"
 	"ChatIM/pkg/database"
 	"log"
 	"net"
@@ -14,8 +15,11 @@ import (
 
 func main() {
 	// 1. 初始化数据源
-
-	db, err := database.InitDB()
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
+	db, err := database.InitDB(cfg.Database.MySQL.DSN)
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
@@ -23,16 +27,16 @@ func main() {
 	// 2. 创建 gRPC 服务器
 	grpcSrv := grpc.NewServer()
 
-	lis, err := net.Listen("tcp", ":50052") // 👈 使用新端口 50052
+	lis, err := net.Listen("tcp", cfg.Server.MessageGRPCPort) // 👈 使用新端口 50052
 	if err != nil {
-		log.Fatalf("Failed to listen on gRPC port 50052: %v", err)
+		log.Fatalf("Failed to listen on gRPC port %v: %v", cfg.Server.MessageGRPCPort, err)
 	}
-	log.Println("gRPC server is running on :50052...")
+	log.Printf("gRPC server is running on :%v...", cfg.Server.MessageGRPCPort)
 
 	// 3. 注册服务
 	pb.RegisterMessageServiceServer(grpcSrv, handler.NewMessageHandler(db))
 
-	log.Println("Message service is running on :50052...")
+	log.Printf("Message service is running on :%v...", cfg.Server.MessageGRPCPort)
 	reflection.Register(grpcSrv)
 
 	if err := grpcSrv.Serve(lis); err != nil {

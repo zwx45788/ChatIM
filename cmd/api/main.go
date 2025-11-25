@@ -7,6 +7,7 @@ import (
 
 	"ChatIM/internal/api_gateway/handler"
 	"ChatIM/internal/api_gateway/middleware"
+	"ChatIM/pkg/config"
 )
 
 func main() {
@@ -16,7 +17,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize user gateway handler: %v", err)
 	}
-
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
 	// 设置路由
 	api := r.Group("/api/v1")
 	{
@@ -31,11 +35,12 @@ func main() {
 			// 以后其他需要认证的路由都加在这里
 			// protected.PUT("/users/me", userHandler.UpdateCurrentUser)
 			protected.POST("/messages/send", userHandler.SendMessage)
+			protected.GET("/messages", userHandler.PullMessage)
 		}
 	}
 
-	log.Println("API Gateway is running on :8080...")
-	if err := r.Run(":8080"); err != nil {
+	log.Printf("API Gateway is running on :%v...", cfg.Server.APIPort)
+	if err := r.Run(cfg.Server.APIPort); err != nil {
 		log.Fatalf("Failed to run API Gateway: %v", err)
 	}
 }
