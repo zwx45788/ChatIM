@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 
@@ -25,6 +26,11 @@ func main() {
 	}
 	defer db.Close()
 	// 2. 创建 gRPC 服务器
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     cfg.Database.Redis.Addr,
+		Password: cfg.Database.Redis.Password,
+		DB:       cfg.Database.Redis.DB,
+	})
 	grpcSrv := grpc.NewServer()
 
 	lis, err := net.Listen("tcp", cfg.Server.MessageGRPCPort) // 👈 使用新端口 50052
@@ -34,7 +40,7 @@ func main() {
 	log.Printf("gRPC server is running on :%v...", cfg.Server.MessageGRPCPort)
 
 	// 3. 注册服务
-	pb.RegisterMessageServiceServer(grpcSrv, handler.NewMessageHandler(db))
+	pb.RegisterMessageServiceServer(grpcSrv, handler.NewMessageHandler(db, rdb))
 
 	log.Printf("Message service is running on :%v...", cfg.Server.MessageGRPCPort)
 	reflection.Register(grpcSrv)

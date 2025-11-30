@@ -3,7 +3,7 @@ package handler
 import (
 	"context"
 	"database/sql"
-	"errors"
+	"encoding/json"
 	"log"
 	"time"
 
@@ -11,73 +11,64 @@ import (
 	"google.golang.org/grpc/status"
 
 	pb "ChatIM/api/proto/message"
-	"ChatIM/pkg/auth" // 假设你的 JWT 工具函数在这里
+	"ChatIM/pkg/auth"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 )
 
 type MessageHandler struct {
 	pb.UnimplementedMessageServiceServer
-	db *sql.DB
+	db  *sql.DB
+	rdb *redis.Client
 }
 
-func NewMessageHandler(db *sql.DB) *MessageHandler {
+func NewMessageHandler(db *sql.DB, rdb *redis.Client) *MessageHandler {
 	return &MessageHandler{
-		db: db,
+		db:  db,
+		rdb: rdb,
 	}
 }
 
 // SendMessage 实现发送消息的接口
 func (h *MessageHandler) SendMessage(ctx context.Context, req *pb.SendMessageRequest) (*pb.SendMessageResponse, error) {
-	// 1. 从上下文中获取 user_id (发送者)
-	// md, ok := metadata.FromIncomingContext(ctx)
-	// if !ok {
-	// 	return nil, status.Errorf(codes.Unauthenticated, "Missing metadata")
-	// }
-	// authHeaders := md["authorization"]
-	// if len(authHeaders) == 0 {
-	// 	return nil, status.Errorf(codes.Unauthenticated, "Missing authorization token")
-	// }
-
-	// // 👇 修改点 1: 清理 Token，去除 "Bearer " 前缀
-	// tokenString := authHeaders[0]
-	// tokenString = strings.TrimPrefix(tokenString, "Bearer ")
-
-	// claims, err := auth.ParseToken(tokenString)
-	// if err != nil {
-	// 	return nil, status.Errorf(codes.Unauthenticated, "Invalid token: %v", err)
-	// }
-	fromUserID, err := auth.GetUserID(ctx) //检验token并getuserid
+	fromUserID, err := auth.GetUserID(ctx)
 	if err != nil {
 		return nil, err
 	}
 	log.Printf("User %s is sending a message to %s", fromUserID, req.ToUserId)
 
-	// 2. 生成消息 ID 和时间戳
 	msgID := uuid.New().String()
 	createdAt := time.Now().Format("2006-01-02 15:04:05")
 
-	// 3. 将消息插入数据库
 	query := `INSERT INTO messages (id, from_user_id, to_user_id, content, created_at) VALUES (?, ?, ?, ?, ?)`
 	_, err = h.db.ExecContext(ctx, query, msgID, fromUserID, req.ToUserId, req.Content, createdAt)
 	if err != nil {
 		log.Printf("Failed to insert message into database: %v", err)
-
-		// 👇 修改点 2: 增加更精确的错误判断
-		// 检查是否是外键约束错误，即 to_user_id 不存在
-		if errors.Is(err, sql.ErrNoRows) {
-			// 注意：MySQL 的外键错误通常不是 sql.ErrNoRows，而是更具体的错误码
-			// 这里用 sql.ErrNoRows 作为概念示例，实际可能需要检查错误字符串
-			// 例如: strings.Contains(err.Error(), "Cannot add or update a child row")
-			return nil, status.Errorf(codes.NotFound, "Receiver user not found")
-		}
-
 		return nil, status.Errorf(codes.Internal, "Failed to save message")
 	}
-
 	log.Printf("Message %s saved successfully", msgID)
 
-	// 4. 返回成功响应
+	// 👇 4. 【核心】发布消息到 Redis
+	notificationPayload := map[string]string{
+		"to_user_id": req.ToUserId,
+		"msg_id":     msgID,
+	}
+	payloadBytes, err := json.Marshal(notificationPayload)
+	if err != nil {
+		log.Printf("Failed to marshal notification payload: %v", err)
+		// 不影响主流程，只记录日志
+	} else {
+		// 发布到 "message_notifications" 频道
+		err = h.rdb.Publish(ctx, "message_notifications", payloadBytes).Err()
+		if err != nil {
+			log.Printf("Warning: failed to publish message notification to Redis: %v", err)
+			// 同样，不返回错误，只记录日志
+		} else {
+			log.Printf("Successfully published notification for message %s to user %s", msgID, req.ToUserId)
+		}
+	}
+
 	return &pb.SendMessageResponse{
 		Code:    0,
 		Message: "消息发送成功",

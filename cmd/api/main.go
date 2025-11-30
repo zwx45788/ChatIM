@@ -7,12 +7,15 @@ import (
 
 	"ChatIM/internal/api_gateway/handler"
 	"ChatIM/internal/api_gateway/middleware"
+	"ChatIM/internal/websocket"
 	"ChatIM/pkg/config"
 )
 
 func main() {
 	r := gin.Default()
-
+	hub := websocket.NewHub()
+	go hub.Run()
+	go websocket.StartSubscriber(hub)
 	userHandler, err := handler.NewUserGatewayHandler()
 	if err != nil {
 		log.Fatalf("Failed to initialize user gateway handler: %v", err)
@@ -38,7 +41,7 @@ func main() {
 			protected.GET("/messages", userHandler.PullMessage)
 		}
 	}
-
+	r.GET("/ws", middleware.AuthMiddleware(), hub.HandleWebSocket)
 	log.Printf("API Gateway is running on :%v...", cfg.Server.APIPort)
 	if err := r.Run(cfg.Server.APIPort); err != nil {
 		log.Fatalf("Failed to run API Gateway: %v", err)
