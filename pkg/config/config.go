@@ -3,6 +3,7 @@ package config
 
 import (
 	"log"
+	"strings"
 
 	"github.com/spf13/viper"
 )
@@ -17,6 +18,10 @@ type ServerConfig struct {
 	APIPort         string `mapstructure:"api_port"`
 	UserGRPCPort    string `mapstructure:"user_grpc_port"`
 	MessageGRPCPort string `mapstructure:"message_grpc_port"`
+	GroupGRPCPort   string `mapstructure:"group_grpc_port"`
+	UserGRPCAddr    string `mapstructure:"user_grpc_addr"`    // 新增：User Service 地址（用于 API Gateway 连接）
+	MessageGRPCAddr string `mapstructure:"message_grpc_addr"` // 新增：Message Service 地址（用于 API Gateway 连接）
+	GroupGRPCAddr   string `mapstructure:"group_grpc_addr"`   // 新增：Group Service 地址（用于 API Gateway 连接）
 }
 
 type DatabaseConfig struct {
@@ -42,12 +47,17 @@ type JWTConfig struct {
 func LoadConfig() (*Config, error) {
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
-	// viper.AddConfigPath(".")
-	// viper.AddConfigPath("./config")
-	viper.SetConfigFile("D:/git-demo/ChatIM/pkg/config/config.yaml")
-	// 支持环境变量覆盖配置，例如 CHATIM_SERVER_API_PORT
-	viper.AutomaticEnv()
-	viper.SetEnvPrefix("CHATIM") // 环境变量前缀
+	viper.AddConfigPath(".")
+	viper.AddConfigPath("./config")
+	viper.AddConfigPath("/root/config") // Docker 容器内的路径
+
+	viper.SetEnvPrefix("CHATIM")
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	viper.AutomaticEnv() // 👈 这个会自动覆盖 config.yaml 中的值
+
+	// 显式绑定环境变量到对应的配置键
+	viper.BindEnv("server.user_grpc_addr", "CHATIM_SERVER_USER_GRPC_ADDR")
+	viper.BindEnv("server.message_grpc_addr", "CHATIM_SERVER_MESSAGE_GRPC_ADDR")
 
 	if err := viper.ReadInConfig(); err != nil {
 		log.Fatalf("Error reading config file, %s", err)
@@ -57,6 +67,8 @@ func LoadConfig() (*Config, error) {
 	if err := viper.Unmarshal(&config); err != nil {
 		log.Fatalf("Error unmarshaling config, %s", err)
 	}
+
+	log.Printf("Loaded config - UserGRPCAddr: %s, MessageGRPCAddr: %s", config.Server.UserGRPCAddr, config.Server.MessageGRPCAddr)
 
 	return &config, nil
 }

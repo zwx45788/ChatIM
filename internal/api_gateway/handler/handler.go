@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	grpPb "ChatIM/api/proto/group"
 	msgPb "ChatIM/api/proto/message"
 	pb "ChatIM/api/proto/user"
 	"ChatIM/internal/api_gateway/middleware"
@@ -19,6 +20,7 @@ import (
 type UserGatewayHandler struct {
 	userClient    pb.UserServiceClient
 	messageClient msgPb.MessageServiceClient
+	groupClient   grpPb.GroupServiceClient
 }
 
 func NewUserGatewayHandler() (*UserGatewayHandler, error) {
@@ -31,22 +33,50 @@ func NewUserGatewayHandler() (*UserGatewayHandler, error) {
 
 	// 👇 3. 使用配置中的地址创建连接
 	// 连接到 user-service
-	userConn, err := grpc.Dial("127.0.0.1"+cfg.Server.UserGRPCPort, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// 如果环境变量提供了完整地址（如 user-service:50051），直接使用
+	// 否则使用默认的 127.0.0.1:port
+	userAddr := cfg.Server.UserGRPCAddr
+	if userAddr == "" {
+		userAddr = "127.0.0.1" + cfg.Server.UserGRPCPort
+	}
+	log.Printf("Connecting to User Service at: %s", userAddr)
+
+	userConn, err := grpc.Dial(userAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Printf("did not connect to user service: %v", err)
 		return nil, err
 	}
 
 	// 连接到 message-service
-	msgConn, err := grpc.Dial("127.0.0.1"+cfg.Server.MessageGRPCPort, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	messageAddr := cfg.Server.MessageGRPCAddr
+	if messageAddr == "" {
+		messageAddr = "127.0.0.1" + cfg.Server.MessageGRPCPort
+	}
+	log.Printf("Connecting to Message Service at: %s", messageAddr)
+
+	msgConn, err := grpc.Dial(messageAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Printf("did not connect to message service: %v", err)
+		return nil, err
+	}
+
+	// 连接到 group-service
+	groupAddr := cfg.Server.GroupGRPCAddr
+	if groupAddr == "" {
+		groupAddr = "127.0.0.1" + cfg.Server.GroupGRPCPort
+	}
+	log.Printf("Connecting to Group Service at: %s", groupAddr)
+
+	grpConn, err := grpc.Dial(groupAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Printf("did not connect to group service: %v", err)
 		return nil, err
 	}
 
 	return &UserGatewayHandler{
 		userClient:    pb.NewUserServiceClient(userConn),
 		messageClient: msgPb.NewMessageServiceClient(msgConn),
+		groupClient:   grpPb.NewGroupServiceClient(grpConn),
 	}, nil
 }
 
@@ -107,13 +137,90 @@ func (h *UserGatewayHandler) Login(c *gin.Context) {
 	statusCode := http.StatusOK
 	if res.Code != 0 {
 		statusCode = http.StatusUnauthorized // 401
+		c.JSON(statusCode, gin.H{
+			"code":    res.Code,
+			"message": res.Message,
+		})
+		return
 	}
 
+	// 👇 新增：登录成功后，自动拉取未读消息
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		// 创建新的Authorization header（使用新的token）
+		authHeader = "Bearer " + res.Token
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	// 并发拉取私聊和群聊未读消息
+	type UnreadResult struct {
+		privateRes *msgPb.PullUnreadMessagesResponse
+		groupRes   *grpPb.PullAllGroupsUnreadMessagesResponse
+		err        error
+	}
+
+	resultChan := make(chan UnreadResult, 2)
+
+	// 拉取私聊未读
+	go func() {
+		res, err := h.messageClient.PullUnreadMessages(ctx, &msgPb.PullUnreadMessagesRequest{
+			Limit:    100,
+			AutoMark: false, // 只查看，不自动标记
+		})
+		resultChan <- UnreadResult{privateRes: res, err: err}
+	}()
+
+	// 拉取群聊未读
+	go func() {
+		res, err := h.groupClient.PullAllGroupsUnreadMessages(ctx, &grpPb.PullAllGroupsUnreadMessagesRequest{
+			Limit: 20,
+		})
+		resultChan <- UnreadResult{groupRes: res, err: err}
+	}()
+
+	// 等待两个结果
+	var privateResult, groupResult UnreadResult
+	for i := 0; i < 2; i++ {
+		result := <-resultChan
+		if result.privateRes != nil {
+			privateResult = result
+		} else {
+			groupResult = result
+		}
+	}
+
+	// 构建未读消息响应（失败时返回空而不是错误）
+	var privateUnreads interface{}
+	var privateUnreadCount int32
+	if privateResult.err == nil && privateResult.privateRes != nil {
+		privateUnreads = privateResult.privateRes.Msgs
+		privateUnreadCount = privateResult.privateRes.TotalUnread
+	}
+
+	var groupUnreads interface{}
+	var groupUnreadCount int32
+	if groupResult.err == nil && groupResult.groupRes != nil {
+		groupUnreads = groupResult.groupRes.GroupUnreads
+		groupUnreadCount = groupResult.groupRes.TotalUnreadCount
+	}
+
+	totalUnreadCount := privateUnreadCount + groupUnreadCount
+
+	// 返回token和未读消息
 	c.JSON(statusCode, gin.H{
-		"code":    res.Code,
-		"message": res.Message,
-		"token":   res.Token, // 返回 token
+		"code":                 res.Code,
+		"message":              res.Message,
+		"token":                res.Token,
+		"private_unreads":      privateUnreads,
+		"private_unread_count": privateUnreadCount,
+		"group_unreads":        groupUnreads,
+		"group_unread_count":   groupUnreadCount,
+		"total_unread_count":   totalUnreadCount,
 	})
+
+	log.Printf("User logged in successfully, total unread messages: %d", totalUnreadCount)
 }
 func (h *UserGatewayHandler) GetCurrentUser(c *gin.Context) {
 	userID, exists := middleware.GetUserIDFromContext(c)
@@ -251,4 +358,558 @@ func (h *UserGatewayHandler) PullMessage(c *gin.Context) {
 	}
 
 	c.JSON(statusCode, res)
+}
+
+// MarkMessagesAsRead 标记消息已读
+func (h *UserGatewayHandler) MarkMessagesAsRead(c *gin.Context) {
+	var req msgPb.MarkMessagesAsReadRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	res, err := h.messageClient.MarkMessagesAsRead(ctx, &req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+
+	c.JSON(statusCode, res)
+}
+
+// GetUnreadCount 获取未读消息数
+func (h *UserGatewayHandler) GetUnreadCount(c *gin.Context) {
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	res, err := h.messageClient.GetUnreadCount(ctx, &msgPb.GetUnreadCountRequest{})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+
+	c.JSON(statusCode, res)
+}
+
+// PullUnreadMessages 拉取所有未读消息
+func (h *UserGatewayHandler) PullUnreadMessages(c *gin.Context) {
+	limitStr := c.DefaultQuery("limit", "100")
+	autoMarkStr := c.DefaultQuery("auto_mark", "true")
+
+	limit, err := strconv.ParseInt(limitStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit parameter"})
+		return
+	}
+
+	// 将 true/false 字符串转换为布尔值
+	autoMark := autoMarkStr == "true" || autoMarkStr == "1"
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	req := &msgPb.PullUnreadMessagesRequest{
+		Limit:    limit,
+		AutoMark: autoMark,
+	}
+
+	res, err := h.messageClient.PullUnreadMessages(ctx, req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+
+	c.JSON(statusCode, res)
+}
+
+// ========== 群聊相关 API ==========
+
+// CreateGroup 创建群组
+func (h *UserGatewayHandler) CreateGroup(c *gin.Context) {
+	var req grpPb.CreateGroupRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+		return
+	}
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	res, err := h.groupClient.CreateGroup(ctx, &req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusBadRequest
+	}
+
+	c.JSON(statusCode, res)
+}
+
+// GetGroupInfo 获取群组信息
+func (h *UserGatewayHandler) GetGroupInfo(c *gin.Context) {
+	groupID := c.Param("group_id")
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	res, err := h.groupClient.GetGroupInfo(ctx, &grpPb.GetGroupInfoRequest{GroupId: groupID})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+
+	c.JSON(statusCode, res)
+}
+
+// SendGroupMessage 发送群聊消息
+func (h *UserGatewayHandler) SendGroupMessage(c *gin.Context) {
+	var req grpPb.SendGroupMessageRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+		return
+	}
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	res, err := h.groupClient.SendGroupMessage(ctx, &req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+
+	c.JSON(statusCode, res)
+}
+
+// PullGroupMessages 拉取群聊消息
+func (h *UserGatewayHandler) PullGroupMessages(c *gin.Context) {
+	groupID := c.Param("group_id")
+	limitStr := c.DefaultQuery("limit", "20")
+	offsetStr := c.DefaultQuery("offset", "0")
+	beforeMsgID := c.DefaultQuery("before_msg_id", "")
+
+	limit, _ := strconv.ParseInt(limitStr, 10, 64)
+	offset, _ := strconv.ParseInt(offsetStr, 10, 64)
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	res, err := h.groupClient.PullGroupMessages(ctx, &grpPb.PullGroupMessagesRequest{
+		GroupId:     groupID,
+		Limit:       limit,
+		Offset:      offset,
+		BeforeMsgId: beforeMsgID,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+
+	c.JSON(statusCode, res)
+}
+
+// PullGroupUnreadMessages 拉取群聊未读消息
+func (h *UserGatewayHandler) PullGroupUnreadMessages(c *gin.Context) {
+	groupID := c.Param("group_id")
+	limitStr := c.DefaultQuery("limit", "100")
+
+	limit, _ := strconv.ParseInt(limitStr, 10, 64)
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	res, err := h.groupClient.PullGroupUnreadMessages(ctx, &grpPb.PullGroupUnreadMessagesRequest{
+		GroupId: groupID,
+		Limit:   limit,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+
+	c.JSON(statusCode, res)
+}
+
+// GetGroupUnreadCount 获取群聊未读数
+func (h *UserGatewayHandler) GetGroupUnreadCount(c *gin.Context) {
+	groupID := c.Param("group_id")
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	res, err := h.groupClient.GetGroupUnreadCount(ctx, &grpPb.GetGroupUnreadCountRequest{GroupId: groupID})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+
+	c.JSON(statusCode, res)
+}
+
+// AddGroupMember 添加群成员
+func (h *UserGatewayHandler) AddGroupMember(c *gin.Context) {
+	var req grpPb.AddGroupMemberRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+		return
+	}
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	res, err := h.groupClient.AddGroupMember(ctx, &req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+
+	c.JSON(statusCode, res)
+}
+
+// RemoveGroupMember 移除群成员
+func (h *UserGatewayHandler) RemoveGroupMember(c *gin.Context) {
+	var req grpPb.RemoveGroupMemberRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+		return
+	}
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	res, err := h.groupClient.RemoveGroupMember(ctx, &req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+
+	c.JSON(statusCode, res)
+}
+
+// LeaveGroup 离开群组
+func (h *UserGatewayHandler) LeaveGroup(c *gin.Context) {
+	groupID := c.Param("group_id")
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	res, err := h.groupClient.LeaveGroup(ctx, &grpPb.LeaveGroupRequest{GroupId: groupID})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+
+	c.JSON(statusCode, res)
+}
+
+// ListGroups 列出用户的所有群组
+func (h *UserGatewayHandler) ListGroups(c *gin.Context) {
+	limitStr := c.DefaultQuery("limit", "20")
+	offsetStr := c.DefaultQuery("offset", "0")
+
+	limit, _ := strconv.ParseInt(limitStr, 10, 64)
+	offset, _ := strconv.ParseInt(offsetStr, 10, 64)
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	res, err := h.groupClient.ListGroups(ctx, &grpPb.ListGroupsRequest{
+		Limit:  limit,
+		Offset: offset,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+
+	c.JSON(statusCode, res)
+}
+
+// PullAllGroupsUnreadMessages 拉取用户所有群的未读消息（用于上线同步）
+func (h *UserGatewayHandler) PullAllGroupsUnreadMessages(c *gin.Context) {
+	userID, exists := middleware.GetUserIDFromContext(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing authorization header"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	// 获取limit参数，默认20
+	limit := int64(20)
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if parsedLimit, err := strconv.ParseInt(limitStr, 10, 64); err == nil && parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
+
+	res, err := h.groupClient.PullAllGroupsUnreadMessages(ctx, &grpPb.PullAllGroupsUnreadMessagesRequest{
+		Limit: limit,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+
+	c.JSON(statusCode, gin.H{
+		"code":               res.Code,
+		"message":            res.Message,
+		"group_unreads":      res.GroupUnreads,
+		"total_unread_count": res.TotalUnreadCount,
+	})
+
+	log.Printf("User %s pulled all groups unread messages, total groups: %d, total unread: %d", userID, len(res.GroupUnreads), res.TotalUnreadCount)
+}
+
+// PullAllUnreadMessages 拉取所有未读消息（私聊 + 群聊，用于上线一次性同步）
+func (h *UserGatewayHandler) PullAllUnreadMessages(c *gin.Context) {
+	userID, exists := middleware.GetUserIDFromContext(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing authorization header"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	// 获取limit参数
+	limit := int64(100)
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if parsedLimit, err := strconv.ParseInt(limitStr, 10, 64); err == nil && parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
+
+	// 1. 并发拉取私聊和群聊的未读消息
+	type Result struct {
+		privateRes *msgPb.PullUnreadMessagesResponse
+		groupRes   *grpPb.PullAllGroupsUnreadMessagesResponse
+		err        error
+	}
+	resultChan := make(chan Result, 2)
+
+	// 拉取私聊未读消息
+	go func() {
+		res, err := h.messageClient.PullUnreadMessages(ctx, &msgPb.PullUnreadMessagesRequest{
+			Limit:    limit,
+			AutoMark: true, // 自动标记为已读
+		})
+		resultChan <- Result{privateRes: res, err: err}
+	}()
+
+	// 拉取所有群的未读消息
+	go func() {
+		res, err := h.groupClient.PullAllGroupsUnreadMessages(ctx, &grpPb.PullAllGroupsUnreadMessagesRequest{
+			Limit: limit,
+		})
+		resultChan <- Result{groupRes: res, err: err}
+	}()
+
+	// 等待两个结果
+	var privateResult, groupResult Result
+	for i := 0; i < 2; i++ {
+		res := <-resultChan
+		if res.privateRes != nil {
+			privateResult = res
+		} else {
+			groupResult = res
+		}
+	}
+
+	// 检查是否有错误（允许其中一个失败）
+	var privateMessages []*msgPb.Message
+	var privateUnreadCount int32
+	if privateResult.err != nil {
+		log.Printf("Warning: failed to pull private messages: %v", privateResult.err)
+	} else if privateResult.privateRes != nil {
+		privateMessages = privateResult.privateRes.Msgs
+		privateUnreadCount = privateResult.privateRes.TotalUnread
+	}
+
+	var groupUnreads []*grpPb.GroupUnreadInfo
+	var groupUnreadCount int32
+	if groupResult.err != nil {
+		log.Printf("Warning: failed to pull group messages: %v", groupResult.err)
+	} else if groupResult.groupRes != nil {
+		groupUnreads = groupResult.groupRes.GroupUnreads
+		groupUnreadCount = groupResult.groupRes.TotalUnreadCount
+	}
+
+	totalUnread := privateUnreadCount + groupUnreadCount
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":                 0,
+		"message":              "成功拉取所有未读消息",
+		"private_unreads":      privateMessages,
+		"private_unread_count": privateUnreadCount,
+		"group_unreads":        groupUnreads,
+		"group_unread_count":   groupUnreadCount,
+		"total_unread_count":   totalUnread,
+	})
+
+	log.Printf("User %s pulled all unread messages: %d private + %d group, total: %d",
+		userID, privateUnreadCount, groupUnreadCount, totalUnread)
 }

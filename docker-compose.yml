@@ -1,0 +1,98 @@
+version: '3.8'
+
+services:
+  # MySQL 数据库
+  mysql:
+    image: mysql:latest
+    container_name: chatim_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: 060629 # 👈 设置你的 MySQL root 密码
+      MYSQL_DATABASE: chatim
+      MYSQL_USER: chatim_user
+      MYSQL_PASSWORD: chatim_pass
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - chatim_network
+
+  # Redis 缓存
+  redis:
+    image: redis:latest
+    container_name: chatim_redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    networks:
+      - chatim_network
+
+  # User Service
+  user-service:
+    build:
+      context: .
+      dockerfile: cmd/user/Dockerfile
+    container_name: chatim_user_service
+    restart: unless-stopped
+    environment:
+      # 👈 让服务通过容器名访问数据库
+      CHATIM_DATABASE_MYSQL_DSN: "chatim_user:chatim_pass@tcp(mysql:3306)/chatim?charset=utf8mb4&parseTime=True&loc=Local"
+    ports:
+      - "50051:50051"
+    depends_on:
+      - mysql
+    networks:
+      - chatim_network
+
+  # Message Service
+  message-service:
+    build:
+      context: .
+      dockerfile: cmd/message/Dockerfile
+    container_name: chatim_message_service
+    restart: unless-stopped
+    environment:
+      CHATIM_DATABASE_MYSQL_DSN: "chatim_user:chatim_pass@tcp(mysql:3306)/chatim?charset=utf8mb4&parseTime=True&loc=Local"
+      CHATIM_DATABASE_REDIS_ADDR: "redis:6379" # 👈 通过服务名访问 Redis
+    ports:
+      - "50052:50052"
+    depends_on:
+      - mysql
+      - redis
+    networks:
+      - chatim_network
+
+  # API Gateway
+  api-gateway:
+    build:
+      context: .
+      dockerfile: cmd/api/Dockerfile
+    container_name: chatim_api_gateway
+    restart: unless-stopped
+    environment:
+      # 👇 API Gateway 也需要连接数据库和 Redis
+      CHATIM_DATABASE_MYSQL_DSN: "chatim_user:chatim_pass@tcp(mysql:3306)/chatim?charset=utf8mb4&parseTime=True&loc=Local"
+      CHATIM_DATABASE_REDIS_ADDR: "redis:6379"
+      # 👇 告诉 API Gateway，gRPC 服务的地址在哪里（使用服务名）
+      CHATIM_SERVER_USER_GRPC_ADDR: "user-service:50051"
+      CHATIM_SERVER_MESSAGE_GRPC_ADDR: "message-service:50052"
+    ports:
+      - "8081:8080"
+    depends_on:
+      - user-service
+      - message-service
+      - redis
+    networks:
+      - chatim_network
+
+# 定义网络
+networks:
+  chatim_network:
+    driver: bridge
+
+# 定义数据卷，持久化 MySQL 数据
+volumes:
+  mysql_data:
+

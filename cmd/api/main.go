@@ -12,18 +12,25 @@ import (
 )
 
 func main() {
+	log.Println("=== API Gateway starting ===")
 	r := gin.Default()
 	hub := websocket.NewHub()
 	go hub.Run()
 	go websocket.StartSubscriber(hub)
+
+	log.Println("Creating UserGatewayHandler...")
 	userHandler, err := handler.NewUserGatewayHandler()
 	if err != nil {
 		log.Fatalf("Failed to initialize user gateway handler: %v", err)
 	}
+	log.Println("UserGatewayHandler created successfully")
+
+	log.Println("Loading config...")
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
+	log.Println("Config loaded successfully")
 	// 设置路由
 	api := r.Group("/api/v1")
 	{
@@ -39,6 +46,25 @@ func main() {
 			// protected.PUT("/users/me", userHandler.UpdateCurrentUser)
 			protected.POST("/messages/send", userHandler.SendMessage)
 			protected.GET("/messages", userHandler.PullMessage)
+			protected.POST("/messages/read", userHandler.MarkMessagesAsRead)
+			protected.GET("/messages/unread", userHandler.GetUnreadCount)
+			protected.GET("/messages/unread/pull", userHandler.PullUnreadMessages)
+
+			// ========== 统一上线初始化接口 ==========
+			protected.GET("/unread/all", userHandler.PullAllUnreadMessages) // 📌 一次性拉取私聊+群聊未读
+
+			// ========== 群聊相关路由 ==========
+			protected.POST("/groups", userHandler.CreateGroup)
+			protected.GET("/groups/:group_id", userHandler.GetGroupInfo)
+			protected.GET("/groups", userHandler.ListGroups)
+			protected.POST("/groups/:group_id/messages", userHandler.SendGroupMessage)
+			protected.GET("/groups/:group_id/messages", userHandler.PullGroupMessages)
+			protected.GET("/groups/:group_id/messages/unread", userHandler.PullGroupUnreadMessages)
+			protected.GET("/groups/:group_id/unread/count", userHandler.GetGroupUnreadCount)
+			protected.POST("/groups/:group_id/members", userHandler.AddGroupMember)
+			protected.DELETE("/groups/:group_id/members", userHandler.RemoveGroupMember)
+			protected.DELETE("/groups/:group_id", userHandler.LeaveGroup)
+			protected.GET("/groups/unread/all", userHandler.PullAllGroupsUnreadMessages) // 📌 上线拉取所有群未读
 		}
 	}
 	r.GET("/ws", middleware.AuthMiddleware(), hub.HandleWebSocket)

@@ -19,8 +19,11 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	MessageService_SendMessage_FullMethodName  = "/proto.message.MessageService/SendMessage"
-	MessageService_PullMessages_FullMethodName = "/proto.message.MessageService/PullMessages"
+	MessageService_SendMessage_FullMethodName        = "/proto.message.MessageService/SendMessage"
+	MessageService_PullMessages_FullMethodName       = "/proto.message.MessageService/PullMessages"
+	MessageService_MarkMessagesAsRead_FullMethodName = "/proto.message.MessageService/MarkMessagesAsRead"
+	MessageService_GetUnreadCount_FullMethodName     = "/proto.message.MessageService/GetUnreadCount"
+	MessageService_PullUnreadMessages_FullMethodName = "/proto.message.MessageService/PullUnreadMessages"
 )
 
 // MessageServiceClient is the client API for MessageService service.
@@ -33,6 +36,12 @@ type MessageServiceClient interface {
 	SendMessage(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (*SendMessageResponse, error)
 	// 拉取消息
 	PullMessages(ctx context.Context, in *PullMessagesRequest, opts ...grpc.CallOption) (*PullMessagesResponse, error)
+	// 标记消息已读
+	MarkMessagesAsRead(ctx context.Context, in *MarkMessagesAsReadRequest, opts ...grpc.CallOption) (*MarkMessagesAsReadResponse, error)
+	// 获取未读消息数
+	GetUnreadCount(ctx context.Context, in *GetUnreadCountRequest, opts ...grpc.CallOption) (*GetUnreadCountResponse, error)
+	// 拉取所有未读消息（新增）
+	PullUnreadMessages(ctx context.Context, in *PullUnreadMessagesRequest, opts ...grpc.CallOption) (*PullUnreadMessagesResponse, error)
 }
 
 type messageServiceClient struct {
@@ -63,6 +72,36 @@ func (c *messageServiceClient) PullMessages(ctx context.Context, in *PullMessage
 	return out, nil
 }
 
+func (c *messageServiceClient) MarkMessagesAsRead(ctx context.Context, in *MarkMessagesAsReadRequest, opts ...grpc.CallOption) (*MarkMessagesAsReadResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MarkMessagesAsReadResponse)
+	err := c.cc.Invoke(ctx, MessageService_MarkMessagesAsRead_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *messageServiceClient) GetUnreadCount(ctx context.Context, in *GetUnreadCountRequest, opts ...grpc.CallOption) (*GetUnreadCountResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetUnreadCountResponse)
+	err := c.cc.Invoke(ctx, MessageService_GetUnreadCount_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *messageServiceClient) PullUnreadMessages(ctx context.Context, in *PullUnreadMessagesRequest, opts ...grpc.CallOption) (*PullUnreadMessagesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PullUnreadMessagesResponse)
+	err := c.cc.Invoke(ctx, MessageService_PullUnreadMessages_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MessageServiceServer is the server API for MessageService service.
 // All implementations must embed UnimplementedMessageServiceServer
 // for forward compatibility.
@@ -73,6 +112,12 @@ type MessageServiceServer interface {
 	SendMessage(context.Context, *SendMessageRequest) (*SendMessageResponse, error)
 	// 拉取消息
 	PullMessages(context.Context, *PullMessagesRequest) (*PullMessagesResponse, error)
+	// 标记消息已读
+	MarkMessagesAsRead(context.Context, *MarkMessagesAsReadRequest) (*MarkMessagesAsReadResponse, error)
+	// 获取未读消息数
+	GetUnreadCount(context.Context, *GetUnreadCountRequest) (*GetUnreadCountResponse, error)
+	// 拉取所有未读消息（新增）
+	PullUnreadMessages(context.Context, *PullUnreadMessagesRequest) (*PullUnreadMessagesResponse, error)
 	mustEmbedUnimplementedMessageServiceServer()
 }
 
@@ -88,6 +133,15 @@ func (UnimplementedMessageServiceServer) SendMessage(context.Context, *SendMessa
 }
 func (UnimplementedMessageServiceServer) PullMessages(context.Context, *PullMessagesRequest) (*PullMessagesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PullMessages not implemented")
+}
+func (UnimplementedMessageServiceServer) MarkMessagesAsRead(context.Context, *MarkMessagesAsReadRequest) (*MarkMessagesAsReadResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method MarkMessagesAsRead not implemented")
+}
+func (UnimplementedMessageServiceServer) GetUnreadCount(context.Context, *GetUnreadCountRequest) (*GetUnreadCountResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetUnreadCount not implemented")
+}
+func (UnimplementedMessageServiceServer) PullUnreadMessages(context.Context, *PullUnreadMessagesRequest) (*PullUnreadMessagesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PullUnreadMessages not implemented")
 }
 func (UnimplementedMessageServiceServer) mustEmbedUnimplementedMessageServiceServer() {}
 func (UnimplementedMessageServiceServer) testEmbeddedByValue()                        {}
@@ -146,6 +200,60 @@ func _MessageService_PullMessages_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MessageService_MarkMessagesAsRead_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MarkMessagesAsReadRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MessageServiceServer).MarkMessagesAsRead(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MessageService_MarkMessagesAsRead_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MessageServiceServer).MarkMessagesAsRead(ctx, req.(*MarkMessagesAsReadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MessageService_GetUnreadCount_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetUnreadCountRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MessageServiceServer).GetUnreadCount(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MessageService_GetUnreadCount_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MessageServiceServer).GetUnreadCount(ctx, req.(*GetUnreadCountRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MessageService_PullUnreadMessages_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PullUnreadMessagesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MessageServiceServer).PullUnreadMessages(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MessageService_PullUnreadMessages_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MessageServiceServer).PullUnreadMessages(ctx, req.(*PullUnreadMessagesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // MessageService_ServiceDesc is the grpc.ServiceDesc for MessageService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -160,6 +268,18 @@ var MessageService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PullMessages",
 			Handler:    _MessageService_PullMessages_Handler,
+		},
+		{
+			MethodName: "MarkMessagesAsRead",
+			Handler:    _MessageService_MarkMessagesAsRead_Handler,
+		},
+		{
+			MethodName: "GetUnreadCount",
+			Handler:    _MessageService_GetUnreadCount_Handler,
+		},
+		{
+			MethodName: "PullUnreadMessages",
+			Handler:    _MessageService_PullUnreadMessages_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -2,12 +2,19 @@ server:
   api_port: ":8080"
   user_grpc_port: ":50051"
   message_grpc_port: ":50052"
+  group_grpc_port: ":50053"
+  user_grpc_addr: "127.0.0.1:50051"        # 本地开发时使用
+  message_grpc_addr: "127.0.0.1:50052"      # 本地开发时使用
+  group_grpc_addr: "127.0.0.1:50053"        # 本地开发时使用
+  # Docker 环境会通过环境变量覆盖这些值
 
 database:
   mysql:
-    dsn: "root:060629@tcp(127.0.0.1:3306)/chatim?charset=utf8mb4&parseTime=True&loc=Local"
+    # 把 127.0.0.1:3306 改成 mysql:3306
+    dsn: "root:060629@tcp(mysql:3306)/chatim?charset=utf8mb4&parseTime=True&loc=Local"
   redis:
-    addr: "localhost:6379"
+    # 把 localhost:6379 改成 redis:6379
+    addr: "redis:6379"
     password: ""
     db: 0
 
