@@ -10,6 +10,7 @@ import (
 	"ChatIM/internal/user_service/handler"
 	"ChatIM/pkg/config"
 	"ChatIM/pkg/database"
+	"ChatIM/pkg/migrations"
 
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
@@ -28,6 +29,12 @@ func main() {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
 	defer db.Close()
+
+	// 2.5 运行数据库迁移
+	log.Println("Running database migrations...")
+	if err := migrations.RunMigrations(db); err != nil {
+		log.Fatalf("Failed to run migrations: %v", err)
+	}
 
 	// 3. 初始化 Redis 连接
 	rdb := redis.NewClient(&redis.Options{

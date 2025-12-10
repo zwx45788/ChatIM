@@ -3,8 +3,9 @@ package handler
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -12,6 +13,7 @@ import (
 
 	pb "ChatIM/api/proto/message"
 	"ChatIM/pkg/auth"
+	"ChatIM/pkg/stream"
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
@@ -19,18 +21,22 @@ import (
 
 type MessageHandler struct {
 	pb.UnimplementedMessageServiceServer
-	db  *sql.DB
-	rdb *redis.Client
+	db       *sql.DB
+	rdb      *redis.Client
+	streamOp *stream.StreamOperator
+	streamCM *stream.StreamConsumerManager
 }
 
 func NewMessageHandler(db *sql.DB, rdb *redis.Client) *MessageHandler {
 	return &MessageHandler{
-		db:  db,
-		rdb: rdb,
+		db:       db,
+		rdb:      rdb,
+		streamOp: stream.NewStreamOperator(rdb),
+		streamCM: stream.NewStreamConsumerManager(rdb),
 	}
 }
 
-// SendMessage 实现发送消息的接口
+// SendMessage 实现发送消息的接口（使用 Redis Stream）
 func (h *MessageHandler) SendMessage(ctx context.Context, req *pb.SendMessageRequest) (*pb.SendMessageResponse, error) {
 	fromUserID, err := auth.GetUserID(ctx)
 	if err != nil {
@@ -41,33 +47,28 @@ func (h *MessageHandler) SendMessage(ctx context.Context, req *pb.SendMessageReq
 	msgID := uuid.New().String()
 	createdAt := time.Now().Format("2006-01-02 15:04:05")
 
-	query := `INSERT INTO messages (id, from_user_id, to_user_id, content, created_at) VALUES (?, ?, ?, ?, ?)`
-	_, err = h.db.ExecContext(ctx, query, msgID, fromUserID, req.ToUserId, req.Content, createdAt)
+	// 1. 立即写入 Redis Stream（快速响应）
+	_, err = h.streamOp.AddPrivateMessage(ctx, msgID, fromUserID, req.ToUserId, req.Content)
 	if err != nil {
-		log.Printf("Failed to insert message into database: %v", err)
+		log.Printf("Failed to add private message to stream: %v", err)
 		return nil, status.Errorf(codes.Internal, "Failed to save message")
 	}
-	log.Printf("Message %s saved successfully", msgID)
 
-	// 👇 4. 【核心】发布消息到 Redis
-	notificationPayload := map[string]string{
-		"to_user_id": req.ToUserId,
-		"msg_id":     msgID,
-	}
-	payloadBytes, err := json.Marshal(notificationPayload)
-	if err != nil {
-		log.Printf("Failed to marshal notification payload: %v", err)
-		// 不影响主流程，只记录日志
-	} else {
-		// 发布到 "message_notifications" 频道
-		err = h.rdb.Publish(ctx, "message_notifications", payloadBytes).Err()
+	// 2. 异步写入数据库（不阻塞用户）
+	go func() {
+		dbCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		query := `INSERT INTO messages (id, from_user_id, to_user_id, content, created_at) VALUES (?, ?, ?, ?, ?)`
+		_, err := h.db.ExecContext(dbCtx, query, msgID, fromUserID, req.ToUserId, req.Content, createdAt)
 		if err != nil {
-			log.Printf("Warning: failed to publish message notification to Redis: %v", err)
-			// 同样，不返回错误，只记录日志
+			log.Printf("Warning: failed to save message to database: %v", err)
 		} else {
-			log.Printf("Successfully published notification for message %s to user %s", msgID, req.ToUserId)
+			log.Printf("Message %s saved to database successfully", msgID)
 		}
-	}
+	}()
+
+	log.Printf("Message %s sent successfully", msgID)
 
 	return &pb.SendMessageResponse{
 		Code:    0,
@@ -371,5 +372,289 @@ func (h *MessageHandler) PullUnreadMessages(ctx context.Context, req *pb.PullUnr
 		Msgs:        messages,
 		TotalUnread: totalUnread,
 		HasMore:     hasMore,
+	}, nil
+}
+
+// PullAllUnreadOnLogin 登录时拉取所有未读消息（私聊 + 群聊）
+func (h *MessageHandler) PullAllUnreadOnLogin(ctx context.Context, req *pb.PullAllUnreadOnLoginRequest) (*pb.PullAllUnreadOnLoginResponse, error) {
+	userID, err := auth.GetUserID(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Printf("User %s is pulling all unread messages on login", userID)
+
+	// 1. 记录用户上线时间
+	h.streamOp.RecordUserOnlineTime(ctx, userID)
+
+	// 2. 初始化私聊消费者组
+	err = h.streamCM.InitConsumerGroupForPrivateChat(ctx, userID)
+	if err != nil {
+		log.Printf("Warning: failed to initialize consumer group for private chat: %v", err)
+	}
+
+	// 3. 并发拉取私聊和群聊未读
+	privateChan := make(chan []*pb.Message, 1)
+	groupChan := make(chan map[string]*pb.GroupUnreadInfo, 1)
+
+	go func() {
+		msgs := h.pullPrivateUnread(ctx, userID)
+		privateChan <- msgs
+	}()
+
+	go func() {
+		groups := h.pullGroupUnread(ctx, userID)
+		groupChan <- groups
+	}()
+
+	// 4. 等待结果
+	privateMessages := <-privateChan
+	groupMessages := <-groupChan
+
+	// 5. 计算总数
+	totalCount := int32(len(privateMessages))
+	for _, detail := range groupMessages {
+		totalCount += detail.UnreadCount
+	}
+
+	log.Printf("User %s pulled %d private unread and %d group unread messages",
+		userID, len(privateMessages), len(groupMessages))
+
+	response := &pb.PullAllUnreadOnLoginResponse{
+		Code:               0,
+		Message:            "成功拉取未读消息",
+		PrivateMessages:    privateMessages,
+		PrivateUnreadCount: int32(len(privateMessages)),
+		GroupMessages:      groupMessages,
+		GroupUnreadCount:   int32(len(groupMessages)),
+		TotalUnreadCount:   totalCount,
+		PulledAt:           time.Now().Format(time.RFC3339),
+	}
+
+	return response, nil
+}
+
+// pullPrivateUnread 拉取私聊未读消息
+func (h *MessageHandler) pullPrivateUnread(ctx context.Context, userID string) []*pb.Message {
+	streamKey := fmt.Sprintf("stream:private:%s", userID)
+
+	// 从 Stream 读取所有消息
+	messages, err := h.streamOp.ReadMessages(ctx, streamKey, "-", 1000)
+	if err != nil {
+		log.Printf("Error reading private messages from stream: %v", err)
+		return []*pb.Message{}
+	}
+
+	var result []*pb.Message
+	for _, msg := range messages {
+		// 检查消息是否已读
+		isRead := "false"
+		if ir, ok := msg["is_read"]; ok {
+			isRead = ir
+		}
+
+		// 跳过已读消息
+		if isRead == "true" {
+			continue
+		}
+
+		msgID := msg["id"]
+		fromUserID := msg["from_user_id"]
+		content := msg["content"]
+
+		// 解析时间戳
+		var msgTime int64
+		if ts, ok := msg["created_at"]; ok {
+			if t, err := strconv.ParseInt(ts, 10, 64); err == nil {
+				msgTime = t
+			}
+		}
+
+		pbMsg := &pb.Message{
+			Id:         msgID,
+			FromUserId: fromUserID,
+			ToUserId:   userID,
+			Content:    content,
+			IsRead:     false,
+			CreatedAt:  msgTime,
+		}
+
+		result = append(result, pbMsg)
+	}
+
+	log.Printf("User %s pulled %d private unread messages", userID, len(result))
+	return result
+}
+
+// pullGroupUnread 拉取群聊未读消息
+func (h *MessageHandler) pullGroupUnread(ctx context.Context, userID string) map[string]*pb.GroupUnreadInfo {
+	result := make(map[string]*pb.GroupUnreadInfo)
+
+	// 获取用户所在的所有群
+	groups := h.getUserGroups(ctx, userID)
+
+	for _, groupID := range groups {
+		streamKey := fmt.Sprintf("stream:group:%s", groupID)
+
+		// 从 Stream 读取所有消息
+		messages, err := h.streamOp.ReadMessages(ctx, streamKey, "-", 50)
+		if err != nil {
+			log.Printf("Error reading group %s messages: %v", groupID, err)
+			continue
+		}
+
+		var pbMessages []*pb.Message
+		for _, msg := range messages {
+			// 检查消息是否已读
+			isRead := "false"
+			if ir, ok := msg["is_read"]; ok {
+				isRead = ir
+			}
+
+			// 跳过已读消息
+			if isRead == "true" {
+				continue
+			}
+
+			msgID := msg["id"]
+			fromUserID := msg["from_user_id"]
+			content := msg["content"]
+
+			// 解析时间戳
+			var msgTime int64
+			if ts, ok := msg["created_at"]; ok {
+				if t, err := strconv.ParseInt(ts, 10, 64); err == nil {
+					msgTime = t
+				}
+			}
+
+			pbMsg := &pb.Message{
+				Id:         msgID,
+				FromUserId: fromUserID,
+				Content:    content,
+				IsRead:     false,
+				CreatedAt:  msgTime,
+			}
+
+			pbMessages = append(pbMessages, pbMsg)
+		}
+
+		if len(pbMessages) > 0 {
+			result[groupID] = &pb.GroupUnreadInfo{
+				GroupId:     groupID,
+				UnreadCount: int32(len(pbMessages)),
+				Messages:    pbMessages,
+			}
+		}
+
+		log.Printf("Group %s: pulled %d unread messages", groupID, len(pbMessages))
+	}
+
+	return result
+}
+
+// getUserGroups 获取用户所在的所有群
+func (h *MessageHandler) getUserGroups(ctx context.Context, userID string) []string {
+	// 先尝试从缓存读取
+	cachedGroups, _ := h.streamOp.GetCachedUserGroups(ctx, userID)
+	if len(cachedGroups) > 0 {
+		return cachedGroups
+	}
+
+	// 从数据库读取
+	rows, err := h.db.QueryContext(ctx,
+		"SELECT group_id FROM group_members WHERE user_id = ? AND is_deleted = 0",
+		userID)
+	if err != nil {
+		log.Printf("Error querying user groups: %v", err)
+		return []string{}
+	}
+	defer rows.Close()
+
+	var groups []string
+	for rows.Next() {
+		var groupID string
+		if err := rows.Scan(&groupID); err != nil {
+			continue
+		}
+		groups = append(groups, groupID)
+	}
+
+	// 保存到缓存
+	if len(groups) > 0 {
+		h.streamOp.CacheUserGroups(ctx, userID, groups)
+	}
+
+	return groups
+}
+
+// MarkPrivateMessageAsRead 标记私聊消息为已读
+func (h *MessageHandler) MarkPrivateMessageAsRead(ctx context.Context, req *pb.MarkPrivateMessageAsReadRequest) (*pb.MarkPrivateMessageAsReadResponse, error) {
+	userID, err := auth.GetUserID(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	msgID := req.MessageId
+
+	// 1. 在 Redis Stream 中更新已读状态
+	err = h.streamOp.UpdatePrivateMessageAsRead(ctx, userID, msgID)
+	if err != nil {
+		log.Printf("Warning: failed to update message read status in stream: %v", err)
+	}
+
+	// 2. 异步更新数据库
+	go func() {
+		dbCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		h.db.ExecContext(dbCtx,
+			"UPDATE messages SET is_read = true, read_at = NOW() WHERE id = ? AND to_user_id = ?",
+			msgID, userID)
+	}()
+
+	log.Printf("Private message %s marked as read by user %s", msgID, userID)
+
+	return &pb.MarkPrivateMessageAsReadResponse{
+		Code:    0,
+		Message: "消息已标记为已读",
+	}, nil
+}
+
+// MarkGroupMessageAsRead 标记群聊消息为已读
+func (h *MessageHandler) MarkGroupMessageAsRead(ctx context.Context, req *pb.MarkGroupMessageAsReadRequest) (*pb.MarkGroupMessageAsReadResponse, error) {
+	userID, err := auth.GetUserID(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	groupID := req.GroupId
+	lastReadMsgID := req.LastReadMessageId
+
+	// 1. 在 Redis Stream 中更新已读状态
+	err = h.streamOp.UpdateGroupMessageAsRead(ctx, groupID, lastReadMsgID)
+	if err != nil {
+		log.Printf("Warning: failed to update message read status in stream: %v", err)
+	}
+
+	// 2. 异步更新数据库
+	go func() {
+		dbCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		h.db.ExecContext(dbCtx, `
+			INSERT INTO group_read_states (group_id, user_id, last_read_msg_id, last_read_at)
+			VALUES (?, ?, ?, NOW())
+			ON DUPLICATE KEY UPDATE
+				last_read_msg_id = VALUES(last_read_msg_id),
+				last_read_at = NOW()
+		`, groupID, userID, lastReadMsgID)
+	}()
+
+	log.Printf("Group %s messages marked as read by user %s", groupID, userID)
+
+	return &pb.MarkGroupMessageAsReadResponse{
+		Code:    0,
+		Message: "群聊消息已标记为已读",
 	}, nil
 }

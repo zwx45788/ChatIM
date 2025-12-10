@@ -77,6 +77,52 @@ message PullUnreadMessagesResponse {
   bool has_more = 5;              // 是否还有更多未读消息
 }
 
+// 登录时拉取所有未读消息的请求
+message PullAllUnreadOnLoginRequest {
+}
+
+// 群聊未读消息详情
+message GroupUnreadInfo {
+  string group_id = 1;
+  int32 unread_count = 2;
+  repeated Message messages = 3;
+}
+
+// 登录时拉取所有未读消息的响应
+message PullAllUnreadOnLoginResponse {
+  int32 code = 1;
+  string message = 2;
+  repeated Message private_messages = 3;
+  int32 private_unread_count = 4;
+  map<string, GroupUnreadInfo> group_messages = 5;
+  int32 group_unread_count = 6;
+  int32 total_unread_count = 7;
+  string pulled_at = 8;
+}
+
+// 标记私聊消息已读请求
+message MarkPrivateMessageAsReadRequest {
+  string message_id = 1;
+}
+
+// 标记私聊消息已读响应
+message MarkPrivateMessageAsReadResponse {
+  int32 code = 1;
+  string message = 2;
+}
+
+// 标记群聊消息已读请求
+message MarkGroupMessageAsReadRequest {
+  string group_id = 1;
+  string last_read_message_id = 2;
+}
+
+// 标记群聊消息已读响应
+message MarkGroupMessageAsReadResponse {
+  int32 code = 1;
+  string message = 2;
+}
+
 // 定义消息服务
 service MessageService {
   // 发送一条私聊消息
@@ -89,4 +135,10 @@ service MessageService {
   rpc GetUnreadCount (GetUnreadCountRequest) returns (GetUnreadCountResponse);
   // 拉取所有未读消息（新增）
   rpc PullUnreadMessages (PullUnreadMessagesRequest) returns (PullUnreadMessagesResponse);
+  // 登录时拉取所有未读消息
+  rpc PullAllUnreadOnLogin (PullAllUnreadOnLoginRequest) returns (PullAllUnreadOnLoginResponse);
+  // 标记私聊消息已读
+  rpc MarkPrivateMessageAsRead (MarkPrivateMessageAsReadRequest) returns (MarkPrivateMessageAsReadResponse);
+  // 标记群聊消息已读
+  rpc MarkGroupMessageAsRead (MarkGroupMessageAsReadRequest) returns (MarkGroupMessageAsReadResponse);
 }

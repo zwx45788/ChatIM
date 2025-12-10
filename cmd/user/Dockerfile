@@ -25,6 +25,9 @@ COPY --from=builder /app/user-service .
 # 复制配置文件到 config 目录
 COPY --from=builder /app/pkg/config/config.yaml ./config/config.yaml
 
+# 复制迁移文件
+COPY --from=builder /app/migrations ./migrations
+
 # 暴露 gRPC 端口
 EXPOSE 50051
 

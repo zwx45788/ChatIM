@@ -57,14 +57,9 @@ func main() {
 			protected.POST("/groups", userHandler.CreateGroup)
 			protected.GET("/groups/:group_id", userHandler.GetGroupInfo)
 			protected.GET("/groups", userHandler.ListGroups)
-			protected.POST("/groups/:group_id/messages", userHandler.SendGroupMessage)
-			protected.GET("/groups/:group_id/messages", userHandler.PullGroupMessages)
-			protected.GET("/groups/:group_id/messages/unread", userHandler.PullGroupUnreadMessages)
-			protected.GET("/groups/:group_id/unread/count", userHandler.GetGroupUnreadCount)
 			protected.POST("/groups/:group_id/members", userHandler.AddGroupMember)
 			protected.DELETE("/groups/:group_id/members", userHandler.RemoveGroupMember)
 			protected.DELETE("/groups/:group_id", userHandler.LeaveGroup)
-			protected.GET("/groups/unread/all", userHandler.PullAllGroupsUnreadMessages) // 📌 上线拉取所有群未读
 		}
 	}
 	r.GET("/ws", middleware.AuthMiddleware(), hub.HandleWebSocket)

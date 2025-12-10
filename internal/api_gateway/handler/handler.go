@@ -518,135 +518,6 @@ func (h *UserGatewayHandler) GetGroupInfo(c *gin.Context) {
 	c.JSON(statusCode, res)
 }
 
-// SendGroupMessage 发送群聊消息
-func (h *UserGatewayHandler) SendGroupMessage(c *gin.Context) {
-	var req grpPb.SendGroupMessageRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
-		return
-	}
-
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
-		return
-	}
-
-	md := metadata.New(map[string]string{"authorization": authHeader})
-	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
-
-	res, err := h.groupClient.SendGroupMessage(ctx, &req)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	statusCode := http.StatusOK
-	if res.Code != 0 {
-		statusCode = http.StatusInternalServerError
-	}
-
-	c.JSON(statusCode, res)
-}
-
-// PullGroupMessages 拉取群聊消息
-func (h *UserGatewayHandler) PullGroupMessages(c *gin.Context) {
-	groupID := c.Param("group_id")
-	limitStr := c.DefaultQuery("limit", "20")
-	offsetStr := c.DefaultQuery("offset", "0")
-	beforeMsgID := c.DefaultQuery("before_msg_id", "")
-
-	limit, _ := strconv.ParseInt(limitStr, 10, 64)
-	offset, _ := strconv.ParseInt(offsetStr, 10, 64)
-
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
-		return
-	}
-
-	md := metadata.New(map[string]string{"authorization": authHeader})
-	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
-
-	res, err := h.groupClient.PullGroupMessages(ctx, &grpPb.PullGroupMessagesRequest{
-		GroupId:     groupID,
-		Limit:       limit,
-		Offset:      offset,
-		BeforeMsgId: beforeMsgID,
-	})
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	statusCode := http.StatusOK
-	if res.Code != 0 {
-		statusCode = http.StatusInternalServerError
-	}
-
-	c.JSON(statusCode, res)
-}
-
-// PullGroupUnreadMessages 拉取群聊未读消息
-func (h *UserGatewayHandler) PullGroupUnreadMessages(c *gin.Context) {
-	groupID := c.Param("group_id")
-	limitStr := c.DefaultQuery("limit", "100")
-
-	limit, _ := strconv.ParseInt(limitStr, 10, 64)
-
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
-		return
-	}
-
-	md := metadata.New(map[string]string{"authorization": authHeader})
-	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
-
-	res, err := h.groupClient.PullGroupUnreadMessages(ctx, &grpPb.PullGroupUnreadMessagesRequest{
-		GroupId: groupID,
-		Limit:   limit,
-	})
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	statusCode := http.StatusOK
-	if res.Code != 0 {
-		statusCode = http.StatusInternalServerError
-	}
-
-	c.JSON(statusCode, res)
-}
-
-// GetGroupUnreadCount 获取群聊未读数
-func (h *UserGatewayHandler) GetGroupUnreadCount(c *gin.Context) {
-	groupID := c.Param("group_id")
-
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
-		return
-	}
-
-	md := metadata.New(map[string]string{"authorization": authHeader})
-	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
-
-	res, err := h.groupClient.GetGroupUnreadCount(ctx, &grpPb.GetGroupUnreadCountRequest{GroupId: groupID})
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	statusCode := http.StatusOK
-	if res.Code != 0 {
-		statusCode = http.StatusInternalServerError
-	}
-
-	c.JSON(statusCode, res)
-}
-
 // AddGroupMember 添加群成员
 func (h *UserGatewayHandler) AddGroupMember(c *gin.Context) {
 	var req grpPb.AddGroupMemberRequest
@@ -766,56 +637,7 @@ func (h *UserGatewayHandler) ListGroups(c *gin.Context) {
 	if res.Code != 0 {
 		statusCode = http.StatusInternalServerError
 	}
-
 	c.JSON(statusCode, res)
-}
-
-// PullAllGroupsUnreadMessages 拉取用户所有群的未读消息（用于上线同步）
-func (h *UserGatewayHandler) PullAllGroupsUnreadMessages(c *gin.Context) {
-	userID, exists := middleware.GetUserIDFromContext(c)
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
-	}
-
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing authorization header"})
-		return
-	}
-
-	md := metadata.New(map[string]string{"authorization": authHeader})
-	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
-
-	// 获取limit参数，默认20
-	limit := int64(20)
-	if limitStr := c.Query("limit"); limitStr != "" {
-		if parsedLimit, err := strconv.ParseInt(limitStr, 10, 64); err == nil && parsedLimit > 0 {
-			limit = parsedLimit
-		}
-	}
-
-	res, err := h.groupClient.PullAllGroupsUnreadMessages(ctx, &grpPb.PullAllGroupsUnreadMessagesRequest{
-		Limit: limit,
-	})
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	statusCode := http.StatusOK
-	if res.Code != 0 {
-		statusCode = http.StatusInternalServerError
-	}
-
-	c.JSON(statusCode, gin.H{
-		"code":               res.Code,
-		"message":            res.Message,
-		"group_unreads":      res.GroupUnreads,
-		"total_unread_count": res.TotalUnreadCount,
-	})
-
-	log.Printf("User %s pulled all groups unread messages, total groups: %d, total unread: %d", userID, len(res.GroupUnreads), res.TotalUnreadCount)
 }
 
 // PullAllUnreadMessages 拉取所有未读消息（私聊 + 群聊，用于上线一次性同步）
@@ -835,81 +657,20 @@ func (h *UserGatewayHandler) PullAllUnreadMessages(c *gin.Context) {
 	md := metadata.New(map[string]string{"authorization": authHeader})
 	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
 
-	// 获取limit参数
-	limit := int64(100)
-	if limitStr := c.Query("limit"); limitStr != "" {
-		if parsedLimit, err := strconv.ParseInt(limitStr, 10, 64); err == nil && parsedLimit > 0 {
-			limit = parsedLimit
-		}
+	// 调用 Message Service 的 PullAllUnreadOnLogin 获取私聊 + 群聊未读
+	res, err := h.messageClient.PullAllUnreadOnLogin(ctx, &msgPb.PullAllUnreadOnLoginRequest{})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
 	}
-
-	// 1. 并发拉取私聊和群聊的未读消息
-	type Result struct {
-		privateRes *msgPb.PullUnreadMessagesResponse
-		groupRes   *grpPb.PullAllGroupsUnreadMessagesResponse
-		err        error
-	}
-	resultChan := make(chan Result, 2)
-
-	// 拉取私聊未读消息
-	go func() {
-		res, err := h.messageClient.PullUnreadMessages(ctx, &msgPb.PullUnreadMessagesRequest{
-			Limit:    limit,
-			AutoMark: true, // 自动标记为已读
-		})
-		resultChan <- Result{privateRes: res, err: err}
-	}()
-
-	// 拉取所有群的未读消息
-	go func() {
-		res, err := h.groupClient.PullAllGroupsUnreadMessages(ctx, &grpPb.PullAllGroupsUnreadMessagesRequest{
-			Limit: limit,
-		})
-		resultChan <- Result{groupRes: res, err: err}
-	}()
-
-	// 等待两个结果
-	var privateResult, groupResult Result
-	for i := 0; i < 2; i++ {
-		res := <-resultChan
-		if res.privateRes != nil {
-			privateResult = res
-		} else {
-			groupResult = res
-		}
-	}
-
-	// 检查是否有错误（允许其中一个失败）
-	var privateMessages []*msgPb.Message
-	var privateUnreadCount int32
-	if privateResult.err != nil {
-		log.Printf("Warning: failed to pull private messages: %v", privateResult.err)
-	} else if privateResult.privateRes != nil {
-		privateMessages = privateResult.privateRes.Msgs
-		privateUnreadCount = privateResult.privateRes.TotalUnread
-	}
-
-	var groupUnreads []*grpPb.GroupUnreadInfo
-	var groupUnreadCount int32
-	if groupResult.err != nil {
-		log.Printf("Warning: failed to pull group messages: %v", groupResult.err)
-	} else if groupResult.groupRes != nil {
-		groupUnreads = groupResult.groupRes.GroupUnreads
-		groupUnreadCount = groupResult.groupRes.TotalUnreadCount
-	}
-
-	totalUnread := privateUnreadCount + groupUnreadCount
 
 	c.JSON(http.StatusOK, gin.H{
-		"code":                 0,
-		"message":              "成功拉取所有未读消息",
-		"private_unreads":      privateMessages,
-		"private_unread_count": privateUnreadCount,
-		"group_unreads":        groupUnreads,
-		"group_unread_count":   groupUnreadCount,
-		"total_unread_count":   totalUnread,
+		"code":               res.Code,
+		"message":            res.Message,
+		"private_unreads":    res.PrivateMessages,
+		"group_unreads":      res.GroupMessages,
+		"total_unread_count": res.TotalUnreadCount,
 	})
 
-	log.Printf("User %s pulled all unread messages: %d private + %d group, total: %d",
-		userID, privateUnreadCount, groupUnreadCount, totalUnread)
+	log.Printf("User %s pulled all unread messages from Message Service, total: %d", userID, res.TotalUnreadCount)
 }

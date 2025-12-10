@@ -19,6 +19,7 @@ WORKDIR /root/
 
 COPY --from=builder /app/message-service .
 COPY --from=builder /app/pkg/config/config.yaml ./config/config.yaml
+COPY --from=builder /app/migrations ./migrations
 
 # 暴露 gRPC 端口
 EXPOSE 50052
