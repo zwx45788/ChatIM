@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChatIM Enterprise</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        /* 自定义滚动条 */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+        [v-cloak] { display: none; }
+        #error-message { display: none; color: red; padding: 20px; text-align: center; }
+    </style>
+    <script>
+        window.onerror = function(msg, url, lineNo, columnNo, error) {
+            var container = document.getElementById('error-message');
+            if (container) {
+                container.style.display = 'block';
+                container.innerText = 'Error: ' + msg + '\nURL: ' + url + '\nLine: ' + lineNo;
+            }
+            return false;
+        };
+    </script>
+    <script type="importmap">
+        {
+            "imports": {
+                "vue": "https://cdn.jsdelivr.net/npm/vue@3/dist/vue.esm-browser.js",
+                "vue-router": "https://cdn.jsdelivr.net/npm/vue-router@4/dist/vue-router.esm-browser.js",
+                "pinia": "https://cdn.jsdelivr.net/npm/pinia@2/dist/pinia.esm-browser.js",
+                "vue-demi": "https://cdn.jsdelivr.net/npm/vue-demi/lib/index.mjs",
+                "@vue/devtools-api": "https://cdn.jsdelivr.net/npm/@vue/devtools-api@6/lib/esm/index.js"
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-100 h-screen overflow-hidden text-slate-800 font-sans">
+    <div id="error-message"></div>
+    <div id="app" v-cloak class="h-full w-full"></div>
+    <script type="module" src="./src/main.js"></script>
+</body>
+</html>

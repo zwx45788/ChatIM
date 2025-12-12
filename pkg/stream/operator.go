@@ -15,6 +15,8 @@ type StreamOperator struct {
 	rdb *redis.Client
 }
 
+const emptyGroupSentinel = "__empty_group__"
+
 // NewStreamOperator 创建 Stream 操作器
 func NewStreamOperator(rdb *redis.Client) *StreamOperator {
 	return &StreamOperator{
@@ -306,16 +308,20 @@ func (so *StreamOperator) GetUserLastOnlineTime(ctx context.Context, userID stri
 
 // CacheUserGroups 缓存用户所在的群列表
 func (so *StreamOperator) CacheUserGroups(ctx context.Context, userID string, groups []string) error {
-	if len(groups) == 0 {
-		return nil
-	}
-
 	cacheKey := fmt.Sprintf("user:groups:%s", userID)
 
 	// 使用 Set 结构存储，便于后续操作
+	if len(groups) == 0 {
+		if err := so.rdb.SAdd(ctx, cacheKey, emptyGroupSentinel).Err(); err != nil {
+			log.Printf("Error caching empty user group set: %v", err)
+			return err
+		}
+		so.rdb.Expire(ctx, cacheKey, 1*time.Minute)
+		return nil
+	}
+
 	for _, groupID := range groups {
-		err := so.rdb.SAdd(ctx, cacheKey, groupID).Err()
-		if err != nil {
+		if err := so.rdb.SAdd(ctx, cacheKey, groupID).Err(); err != nil {
 			log.Printf("Error caching user group: %v", err)
 			return err
 		}
@@ -327,20 +333,28 @@ func (so *StreamOperator) CacheUserGroups(ctx context.Context, userID string, gr
 	return nil
 }
 
-// GetCachedUserGroups 获取缓存的用户群列表
-func (so *StreamOperator) GetCachedUserGroups(ctx context.Context, userID string) ([]string, error) {
+// GetCachedUserGroups 获取缓存的用户群列表，第二个返回值表示是否命中缓存
+func (so *StreamOperator) GetCachedUserGroups(ctx context.Context, userID string) ([]string, bool, error) {
 	cacheKey := fmt.Sprintf("user:groups:%s", userID)
 
 	groups, err := so.rdb.SMembers(ctx, cacheKey).Result()
 	if err != nil {
 		if err == redis.Nil {
-			return []string{}, nil
+			return []string{}, false, nil
 		}
 		log.Printf("Error getting cached user groups: %v", err)
-		return nil, err
+		return nil, false, err
 	}
 
-	return groups, nil
+	filtered := groups[:0]
+	for _, g := range groups {
+		if g == emptyGroupSentinel {
+			continue
+		}
+		filtered = append(filtered, g)
+	}
+
+	return filtered, true, nil
 }
 
 // InvalidateUserGroupCache 清除用户群列表缓存

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ChatIM · 微信风格客户端</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="loginOverlay" class="overlay hidden">
+    <div class="login-card">
+      <h2>登录</h2>
+      <label class="field">
+        <span>API 基础地址（含 /api/v1）</span>
+        <input id="baseUrl" placeholder="http://localhost:8081/api/v1" />
+      </label>
+      <label class="field">
+        <span>用户名</span>
+        <input id="username" placeholder="用户名" />
+      </label>
+      <label class="field">
+        <span>密码</span>
+        <input id="password" type="password" placeholder="密码" />
+      </label>
+      <div class="actions">
+        <button id="btnLogin">登录</button>
+        <button id="btnCloseLogin" class="ghost">稍后再说</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="app">
+    <aside class="sidebar">
+      <div class="profile">
+        <div>
+          <div class="name" id="meName">未登录</div>
+          <div class="muted" id="meId">-</div>
+        </div>
+        <button id="btnShowLogin" class="ghost">登录</button>
+      </div>
+      <div class="search">
+        <input id="contactInput" placeholder="输入用户ID并回车添加会话" />
+      </div>
+      <div class="chat-list" id="chatList"></div>
+    </aside>
+
+    <section class="chat">
+      <div class="chat-header">
+        <div>
+          <div class="chat-title" id="activeName">请选择会话</div>
+          <div class="muted" id="activeId"></div>
+        </div>
+        <div class="header-actions">
+          <button id="btnPullUnread" class="ghost">拉取未读</button>
+          <button id="btnMarkRead" class="ghost">标记当前已读</button>
+        </div>
+      </div>
+      <div class="messages" id="messageList"></div>
+      <div class="composer">
+        <textarea id="messageInput" rows="2" placeholder="输入消息，Enter 发送"></textarea>
+        <button id="btnSend">发送</button>
+      </div>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

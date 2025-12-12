@@ -1,0 +1,189 @@
+syntax = "proto3";
+
+package friendship;
+
+option go_package = "ChatIM/api/proto/friendship";
+
+service FriendshipService {
+  // 好友请求相关
+  rpc SendFriendRequest (SendFriendRequestRequest) returns (SendFriendRequestResponse);
+  rpc GetFriendRequests (GetFriendRequestsRequest) returns (GetFriendRequestsResponse);
+  rpc ProcessFriendRequest (ProcessFriendRequestRequest) returns (ProcessFriendRequestResponse);
+  rpc GetFriends (GetFriendsRequest) returns (GetFriendsResponse);
+  rpc RemoveFriend (RemoveFriendRequest) returns (RemoveFriendResponse);
+  
+  // 群申请相关
+  rpc SendGroupJoinRequest (SendGroupJoinRequestRequest) returns (SendGroupJoinRequestResponse);
+  rpc GetGroupJoinRequests (GetGroupJoinRequestsRequest) returns (GetGroupJoinRequestsResponse);
+  rpc ProcessGroupJoinRequest (ProcessGroupJoinRequestRequest) returns (ProcessGroupJoinRequestResponse);
+  
+  // 用户群组相关
+  rpc GetUserGroups (GetUserGroupsRequest) returns (GetUserGroupsResponse);
+  rpc LeaveGroup (LeaveGroupRequest) returns (LeaveGroupResponse);
+  rpc RemoveGroupMember (RemoveGroupMemberRequest) returns (RemoveGroupMemberResponse);
+}
+
+// ==================== 好友相关消息 ====================
+
+message SendFriendRequestRequest {
+  string to_user_id = 1;
+  string message = 2;  // 可选备注
+}
+
+message SendFriendRequestResponse {
+  int32 code = 1;
+  string message = 2;
+  string request_id = 3;
+}
+
+message GetFriendRequestsRequest {
+  int32 status = 1;  // 0=pending, 1=accepted, 2=rejected, 3=cancelled
+  int64 limit = 2;
+  int64 offset = 3;
+}
+
+message FriendRequest {
+  string id = 1;
+  string from_user_id = 2;
+  string from_username = 3;
+  string from_nickname = 4;
+  string message = 5;
+  int32 status = 6;  // 0=pending, 1=accepted, 2=rejected, 3=cancelled
+  int64 created_at = 7;
+}
+
+message GetFriendRequestsResponse {
+  int32 code = 1;
+  string message = 2;
+  repeated FriendRequest requests = 3;
+  int32 total = 4;
+}
+
+message ProcessFriendRequestRequest {
+  string request_id = 1;
+  bool accept = 2;  // true=接受，false=拒绝
+}
+
+message ProcessFriendRequestResponse {
+  int32 code = 1;
+  string message = 2;
+}
+
+message GetFriendsRequest {
+  int64 limit = 1;
+  int64 offset = 2;
+}
+
+message Friend {
+  string user_id = 1;
+  string username = 2;
+  string nickname = 3;
+  int64 created_at = 4;  // 添加时间戳
+}
+
+message GetFriendsResponse {
+  int32 code = 1;
+  string message = 2;
+  repeated Friend friends = 3;
+  int32 total = 4;
+}
+
+message RemoveFriendRequest {
+  string friend_user_id = 1;
+}
+
+message RemoveFriendResponse {
+  int32 code = 1;
+  string message = 2;
+}
+
+// ==================== 群申请相关消息 ====================
+
+message SendGroupJoinRequestRequest {
+  string group_id = 1;
+  string message = 2;
+}
+
+message SendGroupJoinRequestResponse {
+  int32 code = 1;
+  string message = 2;
+  string request_id = 3;
+}
+
+message GetGroupJoinRequestsRequest {
+  string group_id = 1;
+  int32 status = 2;  // 0=pending, 1=accepted, 2=rejected, 3=cancelled
+  int64 limit = 3;
+  int64 offset = 4;
+}
+
+message GroupJoinRequest {
+  string id = 1;
+  string from_user_id = 2;
+  string from_username = 3;
+  string from_nickname = 4;
+  string message = 5;
+  int32 status = 6;
+  string group_id = 7;
+  int64 created_at = 8;
+}
+
+message GetGroupJoinRequestsResponse {
+  int32 code = 1;
+  string message = 2;
+  repeated GroupJoinRequest requests = 3;
+  int32 total = 4;
+}
+
+message ProcessGroupJoinRequestRequest {
+  string request_id = 1;
+  bool accept = 2;
+}
+
+message ProcessGroupJoinRequestResponse {
+  int32 code = 1;
+  string message = 2;
+}
+
+// ==================== 用户群组相关消息 ====================
+
+message GetUserGroupsRequest {
+  int64 limit = 1;
+  int64 offset = 2;
+}
+
+message GroupInfo {
+  string group_id = 1;
+  string group_name = 2;
+  string description = 3;
+  int32 member_count = 4;
+  int64 created_at = 5;
+}
+
+message GetUserGroupsResponse {
+  int32 code = 1;
+  string message = 2;
+  repeated GroupInfo groups = 3;
+  int32 total = 4;
+}
+
+// ==================== 群组管理相关消息 ====================
+
+message LeaveGroupRequest {
+  string group_id = 1;
+}
+
+message LeaveGroupResponse {
+  int32 code = 1;
+  string message = 2;
+}
+
+message RemoveGroupMemberRequest {
+  string group_id = 1;
+  string member_user_id = 2;  // 被踢出的成员ID
+}
+
+message RemoveGroupMemberResponse {
+  int32 code = 1;
+  string message = 2;
+}

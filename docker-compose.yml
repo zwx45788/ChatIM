@@ -65,22 +65,22 @@ services:
       - chatim_network
 
   # Group Service
-  group-service:
-    build:
-      context: .
-      dockerfile: cmd/group/Dockerfile
-    container_name: chatim_group_service
-    restart: unless-stopped
-    environment:
-      CHATIM_DATABASE_MYSQL_DSN: "chatim_user:chatim_pass@tcp(mysql:3306)/chatim?charset=utf8mb4&parseTime=True&loc=Local"
-      CHATIM_DATABASE_REDIS_ADDR: "redis:6379"
-    ports:
-      - "50053:50053"
-    depends_on:
-      - mysql
-      - redis
-    networks:
-      - chatim_network
+  # group-service:
+  #   build:
+  #     context: .
+  #     dockerfile: cmd/group/Dockerfile
+  #   container_name: chatim_group_service
+  #   restart: unless-stopped
+  #   environment:
+  #     CHATIM_DATABASE_MYSQL_DSN: "chatim_user:chatim_pass@tcp(mysql:3306)/chatim?charset=utf8mb4&parseTime=True&loc=Local"
+  #     CHATIM_DATABASE_REDIS_ADDR: "redis:6379"
+  #   ports:
+  #     - "50053:50053"
+  #   depends_on:
+  #     - mysql
+  #     - redis
+  #   networks:
+  #     - chatim_network
 
   # API Gateway
   api-gateway:
@@ -99,10 +99,12 @@ services:
       CHATIM_SERVER_GROUP_GRPC_ADDR: "group-service:50053"
     ports:
       - "8081:8080"
+    volumes:
+      - ./frontend-wechat-enterprise:/root/web
     depends_on:
       - user-service
       - message-service
-      - group-service
+      # - group-service
       - redis
     networks:
       - chatim_network

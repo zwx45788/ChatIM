@@ -10,6 +10,12 @@ start "User Service" cmd /k "cd user && go run main.go"
 echo Starting Message service...
 start "Message Service" cmd /k "cd message && go run main.go"
 
+echo Starting Group service...
+start "Group Service" cmd /k "cd group && go run main.go"
+
+echo Starting Friendship service...
+start "Friendship Service" cmd /k "cd friendship && go run main.go"
+
 echo.
 echo All services are starting in separate windows.
 pause

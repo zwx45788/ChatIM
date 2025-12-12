@@ -19,6 +19,7 @@ WORKDIR /root/
 
 COPY --from=builder /app/api-gateway .
 COPY --from=builder /app/pkg/config/config.yaml ./config/config.yaml
+COPY --from=builder /app/frontend-wechat-enterprise ./web
 
 # 暴露 HTTP 端口
 EXPOSE 8080

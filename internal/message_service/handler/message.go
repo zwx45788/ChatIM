@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -24,7 +26,6 @@ type MessageHandler struct {
 	db       *sql.DB
 	rdb      *redis.Client
 	streamOp *stream.StreamOperator
-	streamCM *stream.StreamConsumerManager
 }
 
 func NewMessageHandler(db *sql.DB, rdb *redis.Client) *MessageHandler {
@@ -32,7 +33,6 @@ func NewMessageHandler(db *sql.DB, rdb *redis.Client) *MessageHandler {
 		db:       db,
 		rdb:      rdb,
 		streamOp: stream.NewStreamOperator(rdb),
-		streamCM: stream.NewStreamConsumerManager(rdb),
 	}
 }
 
@@ -95,6 +95,19 @@ func (h *MessageHandler) PullMessages(ctx context.Context, req *pb.PullMessagesR
 
 	log.Printf("User %s is pulling messages", userID)
 
+	// 对分页参数做保护，避免无限制扫描
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	offset := req.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
 	// 2. 准备 SQL 查询
 	query := `
 		SELECT id, from_user_id, to_user_id, content, is_read, read_at, created_at
@@ -104,7 +117,7 @@ func (h *MessageHandler) PullMessages(ctx context.Context, req *pb.PullMessagesR
 		LIMIT ? OFFSET ?`
 
 	// 3. 执行查询
-	rows, err := h.db.QueryContext(ctx, query, userID, req.Limit, req.Offset)
+	rows, err := h.db.QueryContext(ctx, query, userID, limit, offset)
 	if err != nil {
 		log.Printf("Failed to query messages for user %s: %v", userID, err)
 		return nil, status.Errorf(codes.Internal, "Failed to query messages")
@@ -114,43 +127,28 @@ func (h *MessageHandler) PullMessages(ctx context.Context, req *pb.PullMessagesR
 	// 4. 遍历结果集，构建消息列表
 	var messages []*pb.Message
 	for rows.Next() {
-		var msg pb.Message
-		var createdAtStr string // 从数据库读出的是字符串，需要转换
-		var readAtStr sql.NullString
-
-		err := rows.Scan(
-			&msg.Id,
-			&msg.FromUserId,
-			&msg.ToUserId,
-			&msg.Content,
-			&msg.IsRead,
-			&readAtStr,
-			&createdAtStr,
+		var (
+			id           string
+			fromUserID   string
+			toUserID     string
+			content      string
+			isRead       bool
+			readAtStr    sql.NullString
+			createdAtStr string
 		)
-		if err != nil {
-			log.Printf("Failed to scan message row: %v", err)
-			continue // 或者直接返回错误
-		}
 
-		// 将时间字符串转换为时间戳
-		createdAt, err := time.Parse("2006-01-02 15:04:05", createdAtStr)
-		if err != nil {
-			log.Printf("Failed to parse created_at time: %v", err)
+		if err := rows.Scan(&id, &fromUserID, &toUserID, &content, &isRead, &readAtStr, &createdAtStr); err != nil {
+			log.Printf("Failed to scan message row: %v", err)
 			continue
 		}
-		msg.CreatedAt = createdAt.Unix()
 
-		// 处理已读时间（可能为NULL）
-		if readAtStr.Valid {
-			readAt, err := time.Parse("2006-01-02 15:04:05", readAtStr.String)
-			if err != nil {
-				log.Printf("Failed to parse read_at time: %v", err)
-			} else {
-				msg.ReadAt = readAt.Unix()
-			}
+		msg, err := convertDBRowToMessage(id, fromUserID, toUserID, content, isRead, readAtStr, createdAtStr)
+		if err != nil {
+			log.Printf("Failed to convert db row to message: %v", err)
+			continue
 		}
 
-		messages = append(messages, &msg)
+		messages = append(messages, msg)
 	}
 
 	// 检查遍历过程中是否有错误
@@ -190,23 +188,17 @@ func (h *MessageHandler) MarkMessagesAsRead(ctx context.Context, req *pb.MarkMes
 	// 2. 构建批量更新 SQL（只更新接收者是当前用户的消息）
 	currentTime := time.Now().Format("2006-01-02 15:04:05")
 
-	// 使用 IN 子句进行批量更新
-	placeholders := ""
-	args := make([]interface{}, len(req.MessageIds)+2)
-	args[0] = userID
-	args[1] = currentTime
-	for i, msgID := range req.MessageIds {
-		if i > 0 {
-			placeholders += ","
-		}
-		placeholders += "?"
-		args[i+2] = msgID
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(req.MessageIds)), ",")
+	args := make([]interface{}, 0, len(req.MessageIds)+2)
+	args = append(args, currentTime, userID)
+	for _, msgID := range req.MessageIds {
+		args = append(args, msgID)
 	}
 
 	query := `UPDATE messages SET is_read = TRUE, read_at = ? 
 	          WHERE to_user_id = ? AND id IN (` + placeholders + `)`
 
-	result, err := h.db.ExecContext(ctx, query, append([]interface{}{currentTime, userID}, args[2:]...)...)
+	result, err := h.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		log.Printf("Failed to mark messages as read: %v", err)
 		return nil, status.Errorf(codes.Internal, "Failed to mark messages as read")
@@ -266,24 +258,19 @@ func (h *MessageHandler) PullUnreadMessages(ctx context.Context, req *pb.PullUnr
 
 	log.Printf("User %s is pulling unread messages", userID)
 
-	// 设置默认 limit（最多 100 条）
+	// 设置默认 limit，并限制最大值
 	limit := req.Limit
-	if limit <= 0 || limit > 100 {
+	if limit <= 0 {
 		limit = 100
 	}
-
-	// 2. 先查询总未读数
-	var totalUnread int32
-	countQuery := `SELECT COUNT(*) FROM messages WHERE to_user_id = ? AND is_read = FALSE`
-	err = h.db.QueryRowContext(ctx, countQuery, userID).Scan(&totalUnread)
-	if err != nil {
-		log.Printf("Failed to query total unread count: %v", err)
-		return nil, status.Errorf(codes.Internal, "Failed to query unread count")
+	if limit > 200 {
+		limit = 200
 	}
 
-	// 3. 查询未读消息列表
+	// 2. 查询未读消息列表，使用窗口函数一次查询 total
 	query := `
-		SELECT id, from_user_id, to_user_id, content, is_read, read_at, created_at
+		SELECT id, from_user_id, to_user_id, content, is_read, read_at, created_at,
+		       COUNT(*) OVER() AS total_count
 		FROM messages
 		WHERE to_user_id = ? AND is_read = FALSE
 		ORDER BY created_at DESC
@@ -297,47 +284,43 @@ func (h *MessageHandler) PullUnreadMessages(ctx context.Context, req *pb.PullUnr
 	defer rows.Close()
 
 	// 4. 遍历结果集，构建消息列表和 ID 列表
-	var messages []*pb.Message
-	var messageIDs []string
-	for rows.Next() {
-		var msg pb.Message
-		var createdAtStr string
-		var readAtStr sql.NullString
+	var (
+		messages    []*pb.Message
+		messageIDs  []string
+		totalUnread int64
+		totalSeen   bool
+	)
 
-		err := rows.Scan(
-			&msg.Id,
-			&msg.FromUserId,
-			&msg.ToUserId,
-			&msg.Content,
-			&msg.IsRead,
-			&readAtStr,
-			&createdAtStr,
+	for rows.Next() {
+		var (
+			id           string
+			fromUserID   string
+			toUserID     string
+			content      string
+			isRead       bool
+			readAtStr    sql.NullString
+			createdAtStr string
+			rowTotal     sql.NullInt64
 		)
-		if err != nil {
+
+		if err := rows.Scan(&id, &fromUserID, &toUserID, &content, &isRead, &readAtStr, &createdAtStr, &rowTotal); err != nil {
 			log.Printf("Failed to scan message row: %v", err)
 			continue
 		}
 
-		// 将时间字符串转换为时间戳
-		createdAt, err := time.Parse("2006-01-02 15:04:05", createdAtStr)
+		msg, err := convertDBRowToMessage(id, fromUserID, toUserID, content, isRead, readAtStr, createdAtStr)
 		if err != nil {
-			log.Printf("Failed to parse created_at time: %v", err)
+			log.Printf("Failed to convert db row to message: %v", err)
 			continue
 		}
-		msg.CreatedAt = createdAt.Unix()
 
-		// 处理已读时间（可能为NULL）
-		if readAtStr.Valid {
-			readAt, err := time.Parse("2006-01-02 15:04:05", readAtStr.String)
-			if err != nil {
-				log.Printf("Failed to parse read_at time: %v", err)
-			} else {
-				msg.ReadAt = readAt.Unix()
-			}
-		}
-
-		messages = append(messages, &msg)
+		messages = append(messages, msg)
 		messageIDs = append(messageIDs, msg.Id)
+
+		if rowTotal.Valid && !totalSeen {
+			totalUnread = rowTotal.Int64
+			totalSeen = true
+		}
 	}
 
 	// 检查遍历过程中是否有错误
@@ -361,7 +344,7 @@ func (h *MessageHandler) PullUnreadMessages(ctx context.Context, req *pb.PullUnr
 	}
 
 	// 6. 判断是否还有更多未读消息
-	hasMore := totalUnread > int32(limit)
+	hasMore := totalUnread > int64(len(messages))
 
 	log.Printf("Successfully pulled %d unread messages for user %s (total: %d)", len(messages), userID, totalUnread)
 
@@ -370,7 +353,7 @@ func (h *MessageHandler) PullUnreadMessages(ctx context.Context, req *pb.PullUnr
 		Code:        0,
 		Message:     "成功拉取未读消息",
 		Msgs:        messages,
-		TotalUnread: totalUnread,
+		TotalUnread: int32(totalUnread),
 		HasMore:     hasMore,
 	}, nil
 }
@@ -387,29 +370,26 @@ func (h *MessageHandler) PullAllUnreadOnLogin(ctx context.Context, req *pb.PullA
 	// 1. 记录用户上线时间
 	h.streamOp.RecordUserOnlineTime(ctx, userID)
 
-	// 2. 初始化私聊消费者组
-	err = h.streamCM.InitConsumerGroupForPrivateChat(ctx, userID)
-	if err != nil {
-		log.Printf("Warning: failed to initialize consumer group for private chat: %v", err)
-	}
+	// 2. 并发拉取私聊和群聊未读
+	var (
+		privateMessages []*pb.Message
+		groupMessages   map[string]*pb.GroupUnreadInfo
+	)
 
-	// 3. 并发拉取私聊和群聊未读
-	privateChan := make(chan []*pb.Message, 1)
-	groupChan := make(chan map[string]*pb.GroupUnreadInfo, 1)
+	var wg sync.WaitGroup
+	wg.Add(2)
 
 	go func() {
-		msgs := h.pullPrivateUnread(ctx, userID)
-		privateChan <- msgs
+		defer wg.Done()
+		privateMessages = h.pullPrivateUnread(ctx, userID)
 	}()
 
 	go func() {
-		groups := h.pullGroupUnread(ctx, userID)
-		groupChan <- groups
+		defer wg.Done()
+		groupMessages = h.pullGroupUnread(ctx, userID)
 	}()
 
-	// 4. 等待结果
-	privateMessages := <-privateChan
-	groupMessages := <-groupChan
+	wg.Wait()
 
 	// 5. 计算总数
 	totalCount := int32(len(privateMessages))
@@ -438,8 +418,10 @@ func (h *MessageHandler) PullAllUnreadOnLogin(ctx context.Context, req *pb.PullA
 func (h *MessageHandler) pullPrivateUnread(ctx context.Context, userID string) []*pb.Message {
 	streamKey := fmt.Sprintf("stream:private:%s", userID)
 
-	// 从 Stream 读取所有消息
-	messages, err := h.streamOp.ReadMessages(ctx, streamKey, "-", 1000)
+	// 从 Stream 读取所有消息，设置超时时间避免长时间阻塞
+	streamCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	messages, err := h.streamOp.ReadMessages(streamCtx, streamKey, "-", 1000)
 	if err != nil {
 		log.Printf("Error reading private messages from stream: %v", err)
 		return []*pb.Message{}
@@ -447,38 +429,10 @@ func (h *MessageHandler) pullPrivateUnread(ctx context.Context, userID string) [
 
 	var result []*pb.Message
 	for _, msg := range messages {
-		// 检查消息是否已读
-		isRead := "false"
-		if ir, ok := msg["is_read"]; ok {
-			isRead = ir
-		}
-
-		// 跳过已读消息
-		if isRead == "true" {
+		pbMsg, ok := convertStreamEntryToMessage(msg, userID, true)
+		if !ok {
 			continue
 		}
-
-		msgID := msg["id"]
-		fromUserID := msg["from_user_id"]
-		content := msg["content"]
-
-		// 解析时间戳
-		var msgTime int64
-		if ts, ok := msg["created_at"]; ok {
-			if t, err := strconv.ParseInt(ts, 10, 64); err == nil {
-				msgTime = t
-			}
-		}
-
-		pbMsg := &pb.Message{
-			Id:         msgID,
-			FromUserId: fromUserID,
-			ToUserId:   userID,
-			Content:    content,
-			IsRead:     false,
-			CreatedAt:  msgTime,
-		}
-
 		result = append(result, pbMsg)
 	}
 
@@ -496,8 +450,10 @@ func (h *MessageHandler) pullGroupUnread(ctx context.Context, userID string) map
 	for _, groupID := range groups {
 		streamKey := fmt.Sprintf("stream:group:%s", groupID)
 
-		// 从 Stream 读取所有消息
-		messages, err := h.streamOp.ReadMessages(ctx, streamKey, "-", 50)
+		// 从 Stream 读取所有消息，设置超时时间避免长时间阻塞
+		streamCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		messages, err := h.streamOp.ReadMessages(streamCtx, streamKey, "-", 50)
+		cancel()
 		if err != nil {
 			log.Printf("Error reading group %s messages: %v", groupID, err)
 			continue
@@ -505,37 +461,10 @@ func (h *MessageHandler) pullGroupUnread(ctx context.Context, userID string) map
 
 		var pbMessages []*pb.Message
 		for _, msg := range messages {
-			// 检查消息是否已读
-			isRead := "false"
-			if ir, ok := msg["is_read"]; ok {
-				isRead = ir
-			}
-
-			// 跳过已读消息
-			if isRead == "true" {
+			pbMsg, ok := convertStreamEntryToMessage(msg, "", false)
+			if !ok {
 				continue
 			}
-
-			msgID := msg["id"]
-			fromUserID := msg["from_user_id"]
-			content := msg["content"]
-
-			// 解析时间戳
-			var msgTime int64
-			if ts, ok := msg["created_at"]; ok {
-				if t, err := strconv.ParseInt(ts, 10, 64); err == nil {
-					msgTime = t
-				}
-			}
-
-			pbMsg := &pb.Message{
-				Id:         msgID,
-				FromUserId: fromUserID,
-				Content:    content,
-				IsRead:     false,
-				CreatedAt:  msgTime,
-			}
-
 			pbMessages = append(pbMessages, pbMsg)
 		}
 
@@ -556,8 +485,8 @@ func (h *MessageHandler) pullGroupUnread(ctx context.Context, userID string) map
 // getUserGroups 获取用户所在的所有群
 func (h *MessageHandler) getUserGroups(ctx context.Context, userID string) []string {
 	// 先尝试从缓存读取
-	cachedGroups, _ := h.streamOp.GetCachedUserGroups(ctx, userID)
-	if len(cachedGroups) > 0 {
+	cachedGroups, hit, _ := h.streamOp.GetCachedUserGroups(ctx, userID)
+	if hit {
 		return cachedGroups
 	}
 
@@ -580,12 +509,63 @@ func (h *MessageHandler) getUserGroups(ctx context.Context, userID string) []str
 		groups = append(groups, groupID)
 	}
 
-	// 保存到缓存
-	if len(groups) > 0 {
-		h.streamOp.CacheUserGroups(ctx, userID, groups)
-	}
+	// 保存到缓存（包含空结果，避免缓存穿透）
+	h.streamOp.CacheUserGroups(ctx, userID, groups)
 
 	return groups
+}
+
+func convertDBRowToMessage(id, fromUserID, toUserID, content string, isRead bool, readAt sql.NullString, createdAtStr string) (*pb.Message, error) {
+	createdAt, err := time.Parse("2006-01-02 15:04:05", createdAtStr)
+	if err != nil {
+		return nil, err
+	}
+
+	msg := &pb.Message{
+		Id:         id,
+		FromUserId: fromUserID,
+		ToUserId:   toUserID,
+		Content:    content,
+		IsRead:     isRead,
+		CreatedAt:  createdAt.Unix(),
+	}
+
+	if readAt.Valid {
+		if t, err := time.Parse("2006-01-02 15:04:05", readAt.String); err == nil {
+			msg.ReadAt = t.Unix()
+		} else {
+			return nil, err
+		}
+	}
+
+	return msg, nil
+}
+
+func convertStreamEntryToMessage(entry map[string]string, toUserID string, setTo bool) (*pb.Message, bool) {
+	if entry["is_read"] == "true" {
+		return nil, false
+	}
+
+	var createdAt int64
+	if ts, ok := entry["created_at"]; ok {
+		if t, err := strconv.ParseInt(ts, 10, 64); err == nil {
+			createdAt = t
+		}
+	}
+
+	msg := &pb.Message{
+		Id:         entry["id"],
+		FromUserId: entry["from_user_id"],
+		Content:    entry["content"],
+		IsRead:     false,
+		CreatedAt:  createdAt,
+	}
+
+	if setTo {
+		msg.ToUserId = toUserID
+	}
+
+	return msg, true
 }
 
 // MarkPrivateMessageAsRead 标记私聊消息为已读

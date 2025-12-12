@@ -18,6 +18,12 @@ func main() {
 	go hub.Run()
 	go websocket.StartSubscriber(hub)
 
+	// Serve static frontend without conflicting with /api routes
+	r.GET("/", func(c *gin.Context) {
+		c.File("./web/index.html")
+	})
+	r.Static("/web", "./web")
+
 	log.Println("Creating UserGatewayHandler...")
 	userHandler, err := handler.NewUserGatewayHandler()
 	if err != nil {

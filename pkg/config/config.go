@@ -15,13 +15,15 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	APIPort         string `mapstructure:"api_port"`
-	UserGRPCPort    string `mapstructure:"user_grpc_port"`
-	MessageGRPCPort string `mapstructure:"message_grpc_port"`
-	GroupGRPCPort   string `mapstructure:"group_grpc_port"`
-	UserGRPCAddr    string `mapstructure:"user_grpc_addr"`    // 新增：User Service 地址（用于 API Gateway 连接）
-	MessageGRPCAddr string `mapstructure:"message_grpc_addr"` // 新增：Message Service 地址（用于 API Gateway 连接）
-	GroupGRPCAddr   string `mapstructure:"group_grpc_addr"`   // 新增：Group Service 地址（用于 API Gateway 连接）
+	APIPort            string `mapstructure:"api_port"`
+	UserGRPCPort       string `mapstructure:"user_grpc_port"`
+	MessageGRPCPort    string `mapstructure:"message_grpc_port"`
+	GroupGRPCPort      string `mapstructure:"group_grpc_port"`
+	FriendshipGRPCPort string `mapstructure:"friendship_grpc_port"`
+	UserGRPCAddr       string `mapstructure:"user_grpc_addr"`       // 新增：User Service 地址（用于 API Gateway 连接）
+	MessageGRPCAddr    string `mapstructure:"message_grpc_addr"`    // 新增：Message Service 地址（用于 API Gateway 连接）
+	GroupGRPCAddr      string `mapstructure:"group_grpc_addr"`      // 新增：Group Service 地址（用于 API Gateway 连接）
+	FriendshipGRPCAddr string `mapstructure:"friendship_grpc_addr"` // 新增：Friendship Service 地址
 }
 
 type DatabaseConfig struct {
