@@ -34,3 +34,20 @@ logs/
 /build/
 /dist/
 bin/
+
+# 环境变量文件 / Environment variables
+.env
+.env.local
+.env.*.local
+*.env
+
+# 不忽略示例文件 / Keep example files
+!.env.example
+!docker-compose.env
+
+# 配置文件 / Config files
+config.local.yaml
+
+# 临时文件 / Temporary files
+*.tmp
+*.temp

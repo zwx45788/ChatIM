@@ -54,6 +54,11 @@ func (h *MessageHandler) SendMessage(ctx context.Context, req *pb.SendMessageReq
 		return nil, status.Errorf(codes.Internal, "Failed to save message")
 	}
 
+	// 2. 更新双方的会话列表
+	conversationID := fmt.Sprintf("private:%s", req.ToUserId)
+	h.streamOp.UpdateConversationTime(ctx, fromUserID, fmt.Sprintf("private:%s", fromUserID))
+	h.streamOp.UpdateConversationTime(ctx, req.ToUserId, conversationID)
+
 	// 2. 异步写入数据库（不阻塞用户）
 	go func() {
 		dbCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -81,6 +86,107 @@ func (h *MessageHandler) SendMessage(ctx context.Context, req *pb.SendMessageReq
 			CreatedAt:  time.Now().Unix(),
 		},
 	}, nil
+}
+
+// SendGroupMessage 发送群聊消息（写入每个成员的 Stream 并异步持久化到数据库）
+func (h *MessageHandler) SendGroupMessage(ctx context.Context, req *pb.SendGroupMessageRequest) (*pb.SendGroupMessageResponse, error) {
+	fromUserID, err := auth.GetUserID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(req.GroupId) == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "group_id is required")
+	}
+
+	log.Printf("User %s is sending a group message to group %s", fromUserID, req.GroupId)
+
+	msgID := uuid.New().String()
+	createdAt := time.Now().Format("2006-01-02 15:04:05")
+
+	// 1. 查询群成员列表
+	memberIDs, err := h.getGroupMembers(ctx, req.GroupId)
+	if err != nil {
+		log.Printf("Failed to get group members: %v", err)
+		return nil, status.Errorf(codes.Internal, "Failed to get group members")
+	}
+
+	if len(memberIDs) == 0 {
+		return nil, status.Errorf(codes.NotFound, "Group has no members")
+	}
+
+	// 2. 写入所有成员的 Redis Stream (统一使用 stream:private:{user_id})
+	err = h.streamOp.AddGroupMessageToMembers(ctx, msgID, req.GroupId, fromUserID, req.Content, "text", memberIDs)
+	if err != nil {
+		log.Printf("Failed to add group message to members' streams: %v", err)
+		return nil, status.Errorf(codes.Internal, "Failed to save group message")
+	}
+
+	// 3. 更新所有成员的会话列表
+	conversationID := fmt.Sprintf("group:%s", req.GroupId)
+	for _, memberID := range memberIDs {
+		h.streamOp.UpdateConversationTime(ctx, memberID, conversationID)
+	}
+
+	// 3. 异步写入数据库
+	go func() {
+		dbCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		query := `INSERT INTO group_messages (id, group_id, from_user_id, content, created_at) VALUES (?, ?, ?, ?, ?)`
+		_, err := h.db.ExecContext(dbCtx, query, msgID, req.GroupId, fromUserID, req.Content, createdAt)
+		if err != nil {
+			log.Printf("Warning: failed to save group message to database: %v", err)
+		} else {
+			log.Printf("Group message %s saved to database successfully", msgID)
+		}
+	}()
+
+	log.Printf("✅ Group message %s sent to %d members via their personal streams", msgID, len(memberIDs))
+
+	return &pb.SendGroupMessageResponse{
+		Code:    0,
+		Message: "群聊消息发送成功",
+		Msg: &pb.GroupMessage{
+			Id:         msgID,
+			GroupId:    req.GroupId,
+			FromUserId: fromUserID,
+			Content:    req.Content,
+			CreatedAt:  time.Now().Unix(),
+		},
+	}, nil
+}
+
+// getGroupMembers 获取群组的所有成员ID
+func (h *MessageHandler) getGroupMembers(ctx context.Context, groupID string) ([]string, error) {
+	// 先尝试从缓存读取
+	cachedMembers, hit, _ := h.streamOp.GetCachedGroupMembers(ctx, groupID)
+	if hit {
+		return cachedMembers, nil
+	}
+
+	// 从数据库读取
+	rows, err := h.db.QueryContext(ctx,
+		"SELECT user_id FROM group_members WHERE group_id = ? AND is_deleted = 0",
+		groupID)
+	if err != nil {
+		log.Printf("Error querying group members: %v", err)
+		return nil, err
+	}
+	defer rows.Close()
+
+	var members []string
+	for rows.Next() {
+		var userID string
+		if err := rows.Scan(&userID); err != nil {
+			continue
+		}
+		members = append(members, userID)
+	}
+
+	// 保存到缓存
+	h.streamOp.CacheGroupMembers(ctx, groupID, members)
+
+	return members, nil
 }
 
 // internal/message_service/handler/message_handler.go

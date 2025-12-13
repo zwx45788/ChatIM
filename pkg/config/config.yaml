@@ -3,9 +3,11 @@ server:
   user_grpc_port: ":50051"
   message_grpc_port: ":50052"
   group_grpc_port: ":50053"
+  friendship_grpc_port: ":50054"
   user_grpc_addr: "127.0.0.1:50051"        # 本地开发时使用
   message_grpc_addr: "127.0.0.1:50052"      # 本地开发时使用
   group_grpc_addr: "127.0.0.1:50053"        # 本地开发时使用
+  friendship_grpc_addr: "127.0.0.1:50054"   # 本地开发时使用
   # Docker 环境会通过环境变量覆盖这些值
 
 database:

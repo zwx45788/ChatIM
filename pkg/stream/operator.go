@@ -68,8 +68,59 @@ func (so *StreamOperator) AddPrivateMessage(ctx context.Context, msgID, fromUser
 	return msgStreamID, nil
 }
 
-// AddGroupMessage 添加群聊消息到 Stream
+// AddGroupMessageToMembers 添加群聊消息到所有成员的个人 Stream
+// 统一使用 stream:private:{user_id} 格式，群聊消息也写入成员个人流
+func (so *StreamOperator) AddGroupMessageToMembers(ctx context.Context, msgID, groupID, fromUserID, content, msgType string, memberIDs []string) error {
+	now := time.Now()
+
+	payload := map[string]interface{}{
+		"id":           msgID,
+		"group_id":     groupID,
+		"from_user_id": fromUserID,
+		"content":      content,
+		"created_at":   now.Unix(),
+		"msg_type":     msgType,
+		"is_read":      "false",
+		"read_at":      "0",
+		"type":         "group", // 标识这是群聊消息
+	}
+
+	// 遍历所有群成员，写入各自的 stream:private:{user_id}
+	successCount := 0
+	for _, memberID := range memberIDs {
+		// 跳过发送者本人（可选，取决于产品需求）
+		if memberID == fromUserID {
+			continue
+		}
+
+		streamKey := fmt.Sprintf("stream:private:%s", memberID)
+
+		_, err := so.rdb.XAdd(ctx, &redis.XAddArgs{
+			Stream: streamKey,
+			Values: payload,
+		}).Result()
+
+		if err != nil {
+			log.Printf("Warning: failed to add group message to member %s stream: %v", memberID, err)
+			continue
+		}
+
+		successCount++
+	}
+
+	log.Printf("Group message %s added to %d/%d members' streams", msgID, successCount, len(memberIDs)-1)
+
+	if successCount == 0 {
+		return fmt.Errorf("failed to add message to any member stream")
+	}
+
+	return nil
+}
+
+// AddGroupMessage 保留原方法以兼容旧代码（可选）
 func (so *StreamOperator) AddGroupMessage(ctx context.Context, msgID, groupID, fromUserID, content, msgType string) (string, error) {
+	// 这个方法现在废弃，建议使用 AddGroupMessageToMembers
+	// 保留是为了不破坏现有代码
 	streamKey := fmt.Sprintf("stream:group:%s", groupID)
 	now := time.Now()
 
@@ -84,7 +135,6 @@ func (so *StreamOperator) AddGroupMessage(ctx context.Context, msgID, groupID, f
 		"read_at":      "0",
 	}
 
-	// 写入 Stream
 	msgStreamID, err := so.rdb.XAdd(ctx, &redis.XAddArgs{
 		Stream: streamKey,
 		Values: payload,
@@ -370,6 +420,79 @@ func (so *StreamOperator) InvalidateUserGroupCache(ctx context.Context, userID s
 	return nil
 }
 
+// CacheGroupMembers 缓存群成员列表
+func (so *StreamOperator) CacheGroupMembers(ctx context.Context, groupID string, members []string) error {
+	cacheKey := fmt.Sprintf("group:members:%s", groupID)
+
+	// 使用 Set 结构存储
+	if len(members) == 0 {
+		if err := so.rdb.SAdd(ctx, cacheKey, emptyGroupSentinel).Err(); err != nil {
+			log.Printf("Error caching empty group member set: %v", err)
+			return err
+		}
+		so.rdb.Expire(ctx, cacheKey, 1*time.Minute)
+		return nil
+	}
+
+	// 批量添加成员
+	membersInterface := make([]interface{}, len(members))
+	for i, m := range members {
+		membersInterface[i] = m
+	}
+
+	if err := so.rdb.SAdd(ctx, cacheKey, membersInterface...).Err(); err != nil {
+		log.Printf("Error caching group members: %v", err)
+		return err
+	}
+
+	// 设置 5 分钟过期（群成员变化频率较低）
+	so.rdb.Expire(ctx, cacheKey, 5*time.Minute)
+
+	return nil
+}
+
+// GetCachedGroupMembers 获取缓存的群成员列表
+func (so *StreamOperator) GetCachedGroupMembers(ctx context.Context, groupID string) ([]string, bool, error) {
+	cacheKey := fmt.Sprintf("group:members:%s", groupID)
+
+	members, err := so.rdb.SMembers(ctx, cacheKey).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return []string{}, false, nil
+		}
+		log.Printf("Error getting cached group members: %v", err)
+		return nil, false, err
+	}
+
+	if len(members) == 0 {
+		return []string{}, false, nil
+	}
+
+	// 过滤空标记
+	filtered := members[:0]
+	for _, m := range members {
+		if m == emptyGroupSentinel {
+			continue
+		}
+		filtered = append(filtered, m)
+	}
+
+	return filtered, true, nil
+}
+
+// InvalidateGroupMemberCache 清除群成员列表缓存
+func (so *StreamOperator) InvalidateGroupMemberCache(ctx context.Context, groupID string) error {
+	cacheKey := fmt.Sprintf("group:members:%s", groupID)
+
+	err := so.rdb.Del(ctx, cacheKey).Err()
+	if err != nil {
+		log.Printf("Error invalidating group member cache: %v", err)
+		return err
+	}
+
+	return nil
+}
+
 // UpdatePrivateMessageAsRead 标记私聊消息为已读（在 Stream 中更新）
 func (so *StreamOperator) UpdatePrivateMessageAsRead(ctx context.Context, toUserID, messageID string) error {
 	streamKey := fmt.Sprintf("stream:private:%s", toUserID)
@@ -435,4 +558,154 @@ func (so *StreamOperator) GetMessageReadStatus(ctx context.Context, messageID st
 	}
 
 	return result == "true", nil
+}
+
+// ==================== 会话列表管理 ====================
+
+// UpdateConversationTime 更新会话的最新消息时间（收到消息时调用）
+func (so *StreamOperator) UpdateConversationTime(ctx context.Context, userID, conversationID string) error {
+	key := fmt.Sprintf("conversation:list:%s", userID)
+	score := float64(time.Now().UnixMilli())
+
+	// 检查是否已置顶
+	currentScore := so.rdb.ZScore(ctx, key, conversationID).Val()
+	if currentScore > 10000000000000 {
+		// 已置顶，保持置顶状态，更新置顶内的时间
+		score = 10000000000000 + score
+	}
+
+	err := so.rdb.ZAdd(ctx, key, redis.Z{
+		Score:  score,
+		Member: conversationID,
+	}).Err()
+
+	if err != nil {
+		log.Printf("Error updating conversation time: %v", err)
+		return err
+	}
+
+	// 设置过期时间（30天）
+	so.rdb.Expire(ctx, key, 30*24*time.Hour)
+
+	return nil
+}
+
+// PinConversation 置顶会话
+func (so *StreamOperator) PinConversation(ctx context.Context, userID, conversationID string) error {
+	key := fmt.Sprintf("conversation:list:%s", userID)
+
+	// 获取当前 score
+	currentScore := so.rdb.ZScore(ctx, key, conversationID).Val()
+	if currentScore == 0 {
+		// 会话不存在，使用当前时间
+		currentScore = float64(time.Now().UnixMilli())
+	}
+
+	// 如果已经置顶，不做处理
+	if currentScore > 10000000000000 {
+		log.Printf("Conversation %s already pinned", conversationID)
+		return nil
+	}
+
+	// 置顶：10^13 + 当前时间戳
+	pinnedScore := 10000000000000 + currentScore
+
+	err := so.rdb.ZAdd(ctx, key, redis.Z{
+		Score:  pinnedScore,
+		Member: conversationID,
+	}).Err()
+
+	if err != nil {
+		log.Printf("Error pinning conversation: %v", err)
+		return err
+	}
+
+	log.Printf("✅ Pinned conversation %s for user %s", conversationID, userID)
+	return nil
+}
+
+// UnpinConversation 取消置顶会话
+func (so *StreamOperator) UnpinConversation(ctx context.Context, userID, conversationID string) error {
+	key := fmt.Sprintf("conversation:list:%s", userID)
+
+	// 获取当前 score
+	currentScore := so.rdb.ZScore(ctx, key, conversationID).Val()
+	if currentScore == 0 {
+		return fmt.Errorf("conversation not found")
+	}
+
+	// 如果未置顶，不做处理
+	if currentScore < 10000000000000 {
+		log.Printf("Conversation %s is not pinned", conversationID)
+		return nil
+	}
+
+	// 还原到原始时间戳
+	originalScore := currentScore - 10000000000000
+
+	err := so.rdb.ZAdd(ctx, key, redis.Z{
+		Score:  originalScore,
+		Member: conversationID,
+	}).Err()
+
+	if err != nil {
+		log.Printf("Error unpinning conversation: %v", err)
+		return err
+	}
+
+	log.Printf("✅ Unpinned conversation %s for user %s", conversationID, userID)
+	return nil
+}
+
+// GetConversationList 获取会话列表（按时间降序，置顶在前）
+func (so *StreamOperator) GetConversationList(ctx context.Context, userID string, offset, limit int64) ([]ConversationItem, error) {
+	key := fmt.Sprintf("conversation:list:%s", userID)
+
+	// ZREVRANGE：按 score 降序（置顶和最新的在前）
+	results, err := so.rdb.ZRevRangeWithScores(ctx, key, offset, offset+limit-1).Result()
+	if err != nil {
+		log.Printf("Error getting conversation list: %v", err)
+		return nil, err
+	}
+
+	var conversations []ConversationItem
+	for _, z := range results {
+		conversationID := z.Member.(string)
+		score := z.Score
+
+		isPinned := score > 10000000000000
+		lastMessageTime := int64(score)
+		if isPinned {
+			lastMessageTime = int64(score - 10000000000000)
+		}
+
+		conversations = append(conversations, ConversationItem{
+			ConversationID:  conversationID,
+			LastMessageTime: lastMessageTime,
+			IsPinned:        isPinned,
+		})
+	}
+
+	return conversations, nil
+}
+
+// ConversationItem 会话列表项
+type ConversationItem struct {
+	ConversationID  string `json:"conversation_id"`   // 格式: "private:{user_id}" 或 "group:{group_id}"
+	LastMessageTime int64  `json:"last_message_time"` // 毫秒时间戳
+	IsPinned        bool   `json:"is_pinned"`
+}
+
+// DeleteConversation 删除会话
+func (so *StreamOperator) DeleteConversation(ctx context.Context, userID, conversationID string) error {
+	key := fmt.Sprintf("conversation:list:%s", userID)
+
+	err := so.rdb.ZRem(ctx, key, conversationID).Err()
+	if err != nil {
+		log.Printf("Error deleting conversation: %v", err)
+		return err
+	}
+
+	log.Printf("✅ Deleted conversation %s for user %s", conversationID, userID)
+	return nil
 }

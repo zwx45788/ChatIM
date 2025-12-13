@@ -15,6 +15,15 @@ message Message {
   int64 read_at = 7;       // 已读时间 (Unix时间戳)
 }
 
+// 群聊消息数据结构
+message GroupMessage {
+  string id = 1;          // 消息唯一ID
+  string group_id = 2;    // 群组ID
+  string from_user_id = 3; // 发送者ID
+  string content = 4;      // 消息内容
+  int64 created_at = 5;    // 创建时间
+}
+
 // 发送消息的请求
 message SendMessageRequest {
   string to_user_id = 1;   // 发送给谁
@@ -26,6 +35,19 @@ message SendMessageResponse {
   int32 code = 1;
   string message = 2;
   Message msg = 3; // 返回成功存储的消息详情
+}
+
+// 发送群聊消息的请求
+message SendGroupMessageRequest {
+  string group_id = 1;  // 群组ID
+  string content = 2;   // 消息内容
+}
+
+// 发送群聊消息的响应
+message SendGroupMessageResponse {
+  int32 code = 1;
+  string message = 2;
+  GroupMessage msg = 3; // 返回成功存储的群聊消息详情
 }
 //拉取消息的请求
 message PullMessagesRequest{
@@ -123,10 +145,28 @@ message MarkGroupMessageAsReadResponse {
   string message = 2;
 }
 
+// 拉取群聊消息请求
+message PullGroupMessagesRequest {
+  string group_id = 1;     // 群组ID
+  int64 limit = 2;         // 单次拉取上限
+  int64 offset = 3;        // 分页偏移量
+}
+
+// 拉取群聊消息响应
+message PullGroupMessagesResponse {
+  int32 code = 1;
+  string message = 2;
+  repeated GroupMessage messages = 3; // 群聊消息列表
+  int32 total = 4;         // 总消息数（可选）
+  bool has_more = 5;       // 是否还有更多消息
+}
+
 // 定义消息服务
 service MessageService {
   // 发送一条私聊消息
   rpc SendMessage (SendMessageRequest) returns (SendMessageResponse);
+  // 发送一条群聊消息
+  rpc SendGroupMessage (SendGroupMessageRequest) returns (SendGroupMessageResponse);
   // 拉取消息
   rpc PullMessages (PullMessagesRequest) returns (PullMessagesResponse);
   // 标记消息已读
@@ -141,4 +181,6 @@ service MessageService {
   rpc MarkPrivateMessageAsRead (MarkPrivateMessageAsReadRequest) returns (MarkPrivateMessageAsReadResponse);
   // 标记群聊消息已读
   rpc MarkGroupMessageAsRead (MarkGroupMessageAsReadRequest) returns (MarkGroupMessageAsReadResponse);
+  // 拉取群聊消息
+  rpc PullGroupMessages (PullGroupMessagesRequest) returns (PullGroupMessagesResponse);
 }

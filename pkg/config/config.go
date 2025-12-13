@@ -61,6 +61,7 @@ func LoadConfig() (*Config, error) {
 	viper.BindEnv("server.user_grpc_addr", "CHATIM_SERVER_USER_GRPC_ADDR")
 	viper.BindEnv("server.message_grpc_addr", "CHATIM_SERVER_MESSAGE_GRPC_ADDR")
 	viper.BindEnv("server.group_grpc_addr", "CHATIM_SERVER_GROUP_GRPC_ADDR")
+	viper.BindEnv("server.friendship_grpc_addr", "CHATIM_SERVER_FRIENDSHIP_GRPC_ADDR")
 
 	if err := viper.ReadInConfig(); err != nil {
 		log.Fatalf("Error reading config file, %s", err)

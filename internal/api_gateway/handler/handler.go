@@ -320,6 +320,37 @@ func (h *UserGatewayHandler) SendMessage(c *gin.Context) {
 
 	c.JSON(statusCode, res)
 }
+
+// SendGroupMessage 发送群聊消息的 HTTP 处理函数
+func (h *UserGatewayHandler) SendGroupMessage(c *gin.Context) {
+	var req msgPb.SendGroupMessageRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	res, err := h.messageClient.SendGroupMessage(ctx, &req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+
+	c.JSON(statusCode, res)
+}
 func (h *UserGatewayHandler) PullMessage(c *gin.Context) {
 	limitStr := c.DefaultQuery("limit", "20")
 	offsetStr := c.DefaultQuery("offset", "0")

@@ -1389,6 +1389,206 @@ func (x *GetUserGroupsResponse) GetTotal() int32 {
 	return 0
 }
 
+type LeaveGroupRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	GroupId       string                 `protobuf:"bytes,1,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LeaveGroupRequest) Reset() {
+	*x = LeaveGroupRequest{}
+	mi := &file_friendship_friendship_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LeaveGroupRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LeaveGroupRequest) ProtoMessage() {}
+
+func (x *LeaveGroupRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_friendship_friendship_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LeaveGroupRequest.ProtoReflect.Descriptor instead.
+func (*LeaveGroupRequest) Descriptor() ([]byte, []int) {
+	return file_friendship_friendship_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *LeaveGroupRequest) GetGroupId() string {
+	if x != nil {
+		return x.GroupId
+	}
+	return ""
+}
+
+type LeaveGroupResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int32                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LeaveGroupResponse) Reset() {
+	*x = LeaveGroupResponse{}
+	mi := &file_friendship_friendship_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LeaveGroupResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LeaveGroupResponse) ProtoMessage() {}
+
+func (x *LeaveGroupResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_friendship_friendship_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LeaveGroupResponse.ProtoReflect.Descriptor instead.
+func (*LeaveGroupResponse) Descriptor() ([]byte, []int) {
+	return file_friendship_friendship_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *LeaveGroupResponse) GetCode() int32 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *LeaveGroupResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+type RemoveGroupMemberRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	GroupId       string                 `protobuf:"bytes,1,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
+	MemberUserId  string                 `protobuf:"bytes,2,opt,name=member_user_id,json=memberUserId,proto3" json:"member_user_id,omitempty"` // 被踢出的成员ID
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoveGroupMemberRequest) Reset() {
+	*x = RemoveGroupMemberRequest{}
+	mi := &file_friendship_friendship_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoveGroupMemberRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoveGroupMemberRequest) ProtoMessage() {}
+
+func (x *RemoveGroupMemberRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_friendship_friendship_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoveGroupMemberRequest.ProtoReflect.Descriptor instead.
+func (*RemoveGroupMemberRequest) Descriptor() ([]byte, []int) {
+	return file_friendship_friendship_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *RemoveGroupMemberRequest) GetGroupId() string {
+	if x != nil {
+		return x.GroupId
+	}
+	return ""
+}
+
+func (x *RemoveGroupMemberRequest) GetMemberUserId() string {
+	if x != nil {
+		return x.MemberUserId
+	}
+	return ""
+}
+
+type RemoveGroupMemberResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int32                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoveGroupMemberResponse) Reset() {
+	*x = RemoveGroupMemberResponse{}
+	mi := &file_friendship_friendship_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoveGroupMemberResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoveGroupMemberResponse) ProtoMessage() {}
+
+func (x *RemoveGroupMemberResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_friendship_friendship_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoveGroupMemberResponse.ProtoReflect.Descriptor instead.
+func (*RemoveGroupMemberResponse) Descriptor() ([]byte, []int) {
+	return file_friendship_friendship_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *RemoveGroupMemberResponse) GetCode() int32 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *RemoveGroupMemberResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 var File_friendship_friendship_proto protoreflect.FileDescriptor
 
 const file_friendship_friendship_proto_rawDesc = "" +
@@ -1500,7 +1700,18 @@ const file_friendship_friendship_proto_rawDesc = "" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12-\n" +
 	"\x06groups\x18\x03 \x03(\v2\x15.friendship.GroupInfoR\x06groups\x12\x14\n" +
-	"\x05total\x18\x04 \x01(\x05R\x05total2\x82\a\n" +
+	"\x05total\x18\x04 \x01(\x05R\x05total\".\n" +
+	"\x11LeaveGroupRequest\x12\x19\n" +
+	"\bgroup_id\x18\x01 \x01(\tR\agroupId\"B\n" +
+	"\x12LeaveGroupResponse\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"[\n" +
+	"\x18RemoveGroupMemberRequest\x12\x19\n" +
+	"\bgroup_id\x18\x01 \x01(\tR\agroupId\x12$\n" +
+	"\x0emember_user_id\x18\x02 \x01(\tR\fmemberUserId\"I\n" +
+	"\x19RemoveGroupMemberResponse\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage2\xb1\b\n" +
 	"\x11FriendshipService\x12`\n" +
 	"\x11SendFriendRequest\x12$.friendship.SendFriendRequestRequest\x1a%.friendship.SendFriendRequestResponse\x12`\n" +
 	"\x11GetFriendRequests\x12$.friendship.GetFriendRequestsRequest\x1a%.friendship.GetFriendRequestsResponse\x12i\n" +
@@ -1511,7 +1722,10 @@ const file_friendship_friendship_proto_rawDesc = "" +
 	"\x14SendGroupJoinRequest\x12'.friendship.SendGroupJoinRequestRequest\x1a(.friendship.SendGroupJoinRequestResponse\x12i\n" +
 	"\x14GetGroupJoinRequests\x12'.friendship.GetGroupJoinRequestsRequest\x1a(.friendship.GetGroupJoinRequestsResponse\x12r\n" +
 	"\x17ProcessGroupJoinRequest\x12*.friendship.ProcessGroupJoinRequestRequest\x1a+.friendship.ProcessGroupJoinRequestResponse\x12T\n" +
-	"\rGetUserGroups\x12 .friendship.GetUserGroupsRequest\x1a!.friendship.GetUserGroupsResponseB\x1dZ\x1bChatIM/api/proto/friendshipb\x06proto3"
+	"\rGetUserGroups\x12 .friendship.GetUserGroupsRequest\x1a!.friendship.GetUserGroupsResponse\x12K\n" +
+	"\n" +
+	"LeaveGroup\x12\x1d.friendship.LeaveGroupRequest\x1a\x1e.friendship.LeaveGroupResponse\x12`\n" +
+	"\x11RemoveGroupMember\x12$.friendship.RemoveGroupMemberRequest\x1a%.friendship.RemoveGroupMemberResponseB\x1dZ\x1bChatIM/api/proto/friendshipb\x06proto3"
 
 var (
 	file_friendship_friendship_proto_rawDescOnce sync.Once
@@ -1525,7 +1739,7 @@ func file_friendship_friendship_proto_rawDescGZIP() []byte {
 	return file_friendship_friendship_proto_rawDescData
 }
 
-var file_friendship_friendship_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_friendship_friendship_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
 var file_friendship_friendship_proto_goTypes = []any{
 	(*SendFriendRequestRequest)(nil),        // 0: friendship.SendFriendRequestRequest
 	(*SendFriendRequestResponse)(nil),       // 1: friendship.SendFriendRequestResponse
@@ -1549,6 +1763,10 @@ var file_friendship_friendship_proto_goTypes = []any{
 	(*GetUserGroupsRequest)(nil),            // 19: friendship.GetUserGroupsRequest
 	(*GroupInfo)(nil),                       // 20: friendship.GroupInfo
 	(*GetUserGroupsResponse)(nil),           // 21: friendship.GetUserGroupsResponse
+	(*LeaveGroupRequest)(nil),               // 22: friendship.LeaveGroupRequest
+	(*LeaveGroupResponse)(nil),              // 23: friendship.LeaveGroupResponse
+	(*RemoveGroupMemberRequest)(nil),        // 24: friendship.RemoveGroupMemberRequest
+	(*RemoveGroupMemberResponse)(nil),       // 25: friendship.RemoveGroupMemberResponse
 }
 var file_friendship_friendship_proto_depIdxs = []int32{
 	3,  // 0: friendship.GetFriendRequestsResponse.requests:type_name -> friendship.FriendRequest
@@ -1564,17 +1782,21 @@ var file_friendship_friendship_proto_depIdxs = []int32{
 	14, // 10: friendship.FriendshipService.GetGroupJoinRequests:input_type -> friendship.GetGroupJoinRequestsRequest
 	17, // 11: friendship.FriendshipService.ProcessGroupJoinRequest:input_type -> friendship.ProcessGroupJoinRequestRequest
 	19, // 12: friendship.FriendshipService.GetUserGroups:input_type -> friendship.GetUserGroupsRequest
-	1,  // 13: friendship.FriendshipService.SendFriendRequest:output_type -> friendship.SendFriendRequestResponse
-	4,  // 14: friendship.FriendshipService.GetFriendRequests:output_type -> friendship.GetFriendRequestsResponse
-	6,  // 15: friendship.FriendshipService.ProcessFriendRequest:output_type -> friendship.ProcessFriendRequestResponse
-	9,  // 16: friendship.FriendshipService.GetFriends:output_type -> friendship.GetFriendsResponse
-	11, // 17: friendship.FriendshipService.RemoveFriend:output_type -> friendship.RemoveFriendResponse
-	13, // 18: friendship.FriendshipService.SendGroupJoinRequest:output_type -> friendship.SendGroupJoinRequestResponse
-	16, // 19: friendship.FriendshipService.GetGroupJoinRequests:output_type -> friendship.GetGroupJoinRequestsResponse
-	18, // 20: friendship.FriendshipService.ProcessGroupJoinRequest:output_type -> friendship.ProcessGroupJoinRequestResponse
-	21, // 21: friendship.FriendshipService.GetUserGroups:output_type -> friendship.GetUserGroupsResponse
-	13, // [13:22] is the sub-list for method output_type
-	4,  // [4:13] is the sub-list for method input_type
+	22, // 13: friendship.FriendshipService.LeaveGroup:input_type -> friendship.LeaveGroupRequest
+	24, // 14: friendship.FriendshipService.RemoveGroupMember:input_type -> friendship.RemoveGroupMemberRequest
+	1,  // 15: friendship.FriendshipService.SendFriendRequest:output_type -> friendship.SendFriendRequestResponse
+	4,  // 16: friendship.FriendshipService.GetFriendRequests:output_type -> friendship.GetFriendRequestsResponse
+	6,  // 17: friendship.FriendshipService.ProcessFriendRequest:output_type -> friendship.ProcessFriendRequestResponse
+	9,  // 18: friendship.FriendshipService.GetFriends:output_type -> friendship.GetFriendsResponse
+	11, // 19: friendship.FriendshipService.RemoveFriend:output_type -> friendship.RemoveFriendResponse
+	13, // 20: friendship.FriendshipService.SendGroupJoinRequest:output_type -> friendship.SendGroupJoinRequestResponse
+	16, // 21: friendship.FriendshipService.GetGroupJoinRequests:output_type -> friendship.GetGroupJoinRequestsResponse
+	18, // 22: friendship.FriendshipService.ProcessGroupJoinRequest:output_type -> friendship.ProcessGroupJoinRequestResponse
+	21, // 23: friendship.FriendshipService.GetUserGroups:output_type -> friendship.GetUserGroupsResponse
+	23, // 24: friendship.FriendshipService.LeaveGroup:output_type -> friendship.LeaveGroupResponse
+	25, // 25: friendship.FriendshipService.RemoveGroupMember:output_type -> friendship.RemoveGroupMemberResponse
+	15, // [15:26] is the sub-list for method output_type
+	4,  // [4:15] is the sub-list for method input_type
 	4,  // [4:4] is the sub-list for extension type_name
 	4,  // [4:4] is the sub-list for extension extendee
 	0,  // [0:4] is the sub-list for field type_name
@@ -1591,7 +1813,7 @@ func file_friendship_friendship_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_friendship_friendship_proto_rawDesc), len(file_friendship_friendship_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   22,
+			NumMessages:   26,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

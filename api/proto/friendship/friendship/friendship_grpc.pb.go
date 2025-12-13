@@ -28,6 +28,8 @@ const (
 	FriendshipService_GetGroupJoinRequests_FullMethodName    = "/friendship.FriendshipService/GetGroupJoinRequests"
 	FriendshipService_ProcessGroupJoinRequest_FullMethodName = "/friendship.FriendshipService/ProcessGroupJoinRequest"
 	FriendshipService_GetUserGroups_FullMethodName           = "/friendship.FriendshipService/GetUserGroups"
+	FriendshipService_LeaveGroup_FullMethodName              = "/friendship.FriendshipService/LeaveGroup"
+	FriendshipService_RemoveGroupMember_FullMethodName       = "/friendship.FriendshipService/RemoveGroupMember"
 )
 
 // FriendshipServiceClient is the client API for FriendshipService service.
@@ -46,6 +48,8 @@ type FriendshipServiceClient interface {
 	ProcessGroupJoinRequest(ctx context.Context, in *ProcessGroupJoinRequestRequest, opts ...grpc.CallOption) (*ProcessGroupJoinRequestResponse, error)
 	// 用户群组相关
 	GetUserGroups(ctx context.Context, in *GetUserGroupsRequest, opts ...grpc.CallOption) (*GetUserGroupsResponse, error)
+	LeaveGroup(ctx context.Context, in *LeaveGroupRequest, opts ...grpc.CallOption) (*LeaveGroupResponse, error)
+	RemoveGroupMember(ctx context.Context, in *RemoveGroupMemberRequest, opts ...grpc.CallOption) (*RemoveGroupMemberResponse, error)
 }
 
 type friendshipServiceClient struct {
@@ -146,6 +150,26 @@ func (c *friendshipServiceClient) GetUserGroups(ctx context.Context, in *GetUser
 	return out, nil
 }
 
+func (c *friendshipServiceClient) LeaveGroup(ctx context.Context, in *LeaveGroupRequest, opts ...grpc.CallOption) (*LeaveGroupResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LeaveGroupResponse)
+	err := c.cc.Invoke(ctx, FriendshipService_LeaveGroup_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *friendshipServiceClient) RemoveGroupMember(ctx context.Context, in *RemoveGroupMemberRequest, opts ...grpc.CallOption) (*RemoveGroupMemberResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RemoveGroupMemberResponse)
+	err := c.cc.Invoke(ctx, FriendshipService_RemoveGroupMember_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // FriendshipServiceServer is the server API for FriendshipService service.
 // All implementations must embed UnimplementedFriendshipServiceServer
 // for forward compatibility.
@@ -162,6 +186,8 @@ type FriendshipServiceServer interface {
 	ProcessGroupJoinRequest(context.Context, *ProcessGroupJoinRequestRequest) (*ProcessGroupJoinRequestResponse, error)
 	// 用户群组相关
 	GetUserGroups(context.Context, *GetUserGroupsRequest) (*GetUserGroupsResponse, error)
+	LeaveGroup(context.Context, *LeaveGroupRequest) (*LeaveGroupResponse, error)
+	RemoveGroupMember(context.Context, *RemoveGroupMemberRequest) (*RemoveGroupMemberResponse, error)
 	mustEmbedUnimplementedFriendshipServiceServer()
 }
 
@@ -198,6 +224,12 @@ func (UnimplementedFriendshipServiceServer) ProcessGroupJoinRequest(context.Cont
 }
 func (UnimplementedFriendshipServiceServer) GetUserGroups(context.Context, *GetUserGroupsRequest) (*GetUserGroupsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetUserGroups not implemented")
+}
+func (UnimplementedFriendshipServiceServer) LeaveGroup(context.Context, *LeaveGroupRequest) (*LeaveGroupResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method LeaveGroup not implemented")
+}
+func (UnimplementedFriendshipServiceServer) RemoveGroupMember(context.Context, *RemoveGroupMemberRequest) (*RemoveGroupMemberResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RemoveGroupMember not implemented")
 }
 func (UnimplementedFriendshipServiceServer) mustEmbedUnimplementedFriendshipServiceServer() {}
 func (UnimplementedFriendshipServiceServer) testEmbeddedByValue()                           {}
@@ -382,6 +414,42 @@ func _FriendshipService_GetUserGroups_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _FriendshipService_LeaveGroup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LeaveGroupRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FriendshipServiceServer).LeaveGroup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: FriendshipService_LeaveGroup_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FriendshipServiceServer).LeaveGroup(ctx, req.(*LeaveGroupRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _FriendshipService_RemoveGroupMember_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoveGroupMemberRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FriendshipServiceServer).RemoveGroupMember(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: FriendshipService_RemoveGroupMember_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FriendshipServiceServer).RemoveGroupMember(ctx, req.(*RemoveGroupMemberRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // FriendshipService_ServiceDesc is the grpc.ServiceDesc for FriendshipService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -424,6 +492,14 @@ var FriendshipService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetUserGroups",
 			Handler:    _FriendshipService_GetUserGroups_Handler,
+		},
+		{
+			MethodName: "LeaveGroup",
+			Handler:    _FriendshipService_LeaveGroup_Handler,
+		},
+		{
+			MethodName: "RemoveGroupMember",
+			Handler:    _FriendshipService_RemoveGroupMember_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

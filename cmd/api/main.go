@@ -31,6 +31,13 @@ func main() {
 	}
 	log.Println("UserGatewayHandler created successfully")
 
+	log.Println("Creating ConversationHandler...")
+	conversationHandler, err := handler.NewConversationHandler()
+	if err != nil {
+		log.Fatalf("Failed to initialize conversation handler: %v", err)
+	}
+	log.Println("ConversationHandler created successfully")
+
 	log.Println("Loading config...")
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -66,6 +73,13 @@ func main() {
 			protected.POST("/groups/:group_id/members", userHandler.AddGroupMember)
 			protected.DELETE("/groups/:group_id/members", userHandler.RemoveGroupMember)
 			protected.DELETE("/groups/:group_id", userHandler.LeaveGroup)
+			protected.POST("/groups/messages", userHandler.SendGroupMessage) // 📌 发送群聊消息
+
+			// ========== 会话列表相关路由 ==========
+			protected.GET("/conversations", conversationHandler.GetConversationList)                       // 📌 获取会话列表
+			protected.POST("/conversations/:conversation_id/pin", conversationHandler.PinConversation)     // 📌 置顶会话
+			protected.DELETE("/conversations/:conversation_id/pin", conversationHandler.UnpinConversation) // 📌 取消置顶
+			protected.DELETE("/conversations/:conversation_id", conversationHandler.DeleteConversation)    // 📌 删除会话
 		}
 	}
 	r.GET("/ws", middleware.AuthMiddleware(), hub.HandleWebSocket)
