@@ -8,19 +8,24 @@ import (
 	"strconv"
 	"time"
 
+	grpPb "ChatIM/api/proto/group"
+	pb "ChatIM/api/proto/user"
 	"ChatIM/internal/api_gateway/middleware"
 	"ChatIM/pkg/config"
-	"ChatIM/pkg/database"
 	"ChatIM/pkg/stream"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // ConversationHandler 会话管理处理器
 type ConversationHandler struct {
-	streamOp *stream.StreamOperator
-	rdb      *redis.Client
+	streamOp    *stream.StreamOperator
+	rdb         *redis.Client
+	userClient  pb.UserServiceClient
+	groupClient grpPb.GroupServiceClient
 }
 
 // NewConversationHandler 创建会话处理器
@@ -37,9 +42,37 @@ func NewConversationHandler() (*ConversationHandler, error) {
 		DB:       cfg.Database.Redis.DB,
 	})
 
+	// 连接到 user-service
+	userAddr := cfg.Server.UserGRPCAddr
+	if userAddr == "" {
+		userAddr = "127.0.0.1" + cfg.Server.UserGRPCPort
+	}
+	log.Printf("ConversationHandler connecting to User Service at: %s", userAddr)
+
+	userConn, err := grpc.Dial(userAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Printf("Failed to connect to user service: %v", err)
+		return nil, err
+	}
+
+	// 连接到 group-service
+	groupAddr := cfg.Server.GroupGRPCAddr
+	if groupAddr == "" {
+		groupAddr = "127.0.0.1" + cfg.Server.GroupGRPCPort
+	}
+	log.Printf("ConversationHandler connecting to Group Service at: %s", groupAddr)
+
+	grpConn, err := grpc.Dial(groupAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Printf("Failed to connect to group service: %v", err)
+		return nil, err
+	}
+
 	return &ConversationHandler{
-		streamOp: stream.NewStreamOperator(rdb),
-		rdb:      rdb,
+		streamOp:    stream.NewStreamOperator(rdb),
+		rdb:         rdb,
+		userClient:  pb.NewUserServiceClient(userConn),
+		groupClient: grpPb.NewGroupServiceClient(grpConn),
 	}, nil
 }
 
@@ -219,40 +252,57 @@ func (h *ConversationHandler) enrichConversationInfo(ctx context.Context, userID
 	return response
 }
 
-// getUserInfo 获取用户信息（简化版，实际应调用 User Service）
+// getUserInfo 获取用户信息
 func (h *ConversationHandler) getUserInfo(ctx context.Context, userID string) map[string]string {
-	// TODO: 调用 User Service 获取用户信息
-	// 这里返回模拟数据
+	// 调用 User Service 获取用户信息
+	res, err := h.userClient.GetUserByID(ctx, &pb.GetUserRequest{Id: userID})
+	if err != nil {
+		log.Printf("Failed to get user info for %s: %v", userID, err)
+		// 返回默认值
+		return map[string]string{
+			"nickname": "User_" + userID[len(userID)-4:],
+			"avatar":   "",
+		}
+	}
+
+	// 使用 nickname，如果为空则使用 username
+	displayName := res.Nickname
+	if displayName == "" {
+		displayName = res.Username
+	}
+
+	// TODO: proto 定义中暂时没有 avatar 字段，后续可以添加
 	return map[string]string{
-		"nickname": "User_" + userID[len(userID)-4:],
-		"avatar":   "https://avatar.example.com/" + userID + ".jpg",
+		"nickname": displayName,
+		"avatar":   "",
 	}
 }
 
-// getGroupInfo 获取群组信息（简化版）
+// getGroupInfo 获取群组信息
 func (h *ConversationHandler) getGroupInfo(ctx context.Context, groupID string) map[string]string {
-	cfg, _ := config.LoadConfig()
-	db, err := database.InitDB(cfg.Database.MySQL.DSN)
+	// 调用 Group Service 获取群组信息
+	res, err := h.groupClient.GetGroupInfo(ctx, &grpPb.GetGroupInfoRequest{GroupId: groupID})
 	if err != nil {
-		return map[string]string{
-			"name":   "Group_" + groupID[len(groupID)-4:],
-			"avatar": "",
-		}
-	}
-	defer db.Close()
-
-	var name, avatar string
-	err = db.QueryRowContext(ctx, "SELECT name, avatar FROM groups WHERE id = ?", groupID).Scan(&name, &avatar)
-	if err != nil {
+		log.Printf("Failed to get group info for %s: %v", groupID, err)
+		// 返回默认值
 		return map[string]string{
 			"name":   "Group_" + groupID[len(groupID)-4:],
 			"avatar": "",
 		}
 	}
 
+	if res.Code != 0 || res.Group == nil {
+		log.Printf("Failed to get group info: %s", res.Message)
+		return map[string]string{
+			"name":   "Group_" + groupID[len(groupID)-4:],
+			"avatar": "",
+		}
+	}
+
+	// TODO: proto 定义中暂时没有 avatar 字段，后续可以添加
 	return map[string]string{
-		"name":   name,
-		"avatar": avatar,
+		"name":   res.Group.Name,
+		"avatar": "",
 	}
 }
 

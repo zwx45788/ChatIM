@@ -351,38 +351,45 @@ func (h *UserGatewayHandler) SendGroupMessage(c *gin.Context) {
 
 	c.JSON(statusCode, res)
 }
+
+// PullMessage 拉取按会话分组的消息（支持私聊和群聊）
 func (h *UserGatewayHandler) PullMessage(c *gin.Context) {
 	limitStr := c.DefaultQuery("limit", "20")
-	offsetStr := c.DefaultQuery("offset", "0")
+	autoMarkStr := c.DefaultQuery("auto_mark", "false")
+	includeReadStr := c.DefaultQuery("include_read", "false")
+
 	limit, err := strconv.ParseInt(limitStr, 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit parameter"})
 		return
 	}
-	offset, err := strconv.ParseInt(offsetStr, 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid offset parameter"})
-		return
-	}
-	//检验token
+
+	autoMark := autoMarkStr == "true" || autoMarkStr == "1"
+	includeRead := includeReadStr == "true" || includeReadStr == "1"
+
+	// 检验 token
 	authHeader := c.GetHeader("Authorization")
 	if authHeader == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
 		return
 	}
+
 	md := metadata.New(map[string]string{"authorization": authHeader})
 	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
 	req := &msgPb.PullMessagesRequest{
-		Limit:  limit,
-		Offset: offset,
+		Limit:       limit,
+		AutoMark:    autoMark,
+		IncludeRead: includeRead,
 	}
+
 	res, err := h.messageClient.PullMessages(ctx, req)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	// 👇 5. 返回响应
+	// 返回响应
 	statusCode := http.StatusOK
 	if res.Code != 0 {
 		statusCode = http.StatusInternalServerError
@@ -704,4 +711,422 @@ func (h *UserGatewayHandler) PullAllUnreadMessages(c *gin.Context) {
 	})
 
 	log.Printf("User %s pulled all unread messages from Message Service, total: %d", userID, res.TotalUnreadCount)
+}
+
+// ==================== 搜索功能接口 ====================
+
+// SearchUsers 搜索用户
+func (h *UserGatewayHandler) SearchUsers(c *gin.Context) {
+	keyword := c.Query("keyword")
+	limitStr := c.DefaultQuery("limit", "20")
+	offsetStr := c.DefaultQuery("offset", "0")
+
+	limit, _ := strconv.ParseInt(limitStr, 10, 64)
+	offset, _ := strconv.ParseInt(offsetStr, 10, 64)
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	res, err := h.userClient.SearchUsers(ctx, &pb.SearchUsersRequest{
+		Keyword: keyword,
+		Limit:   limit,
+		Offset:  offset,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+	c.JSON(statusCode, res)
+}
+
+// SearchGroups 搜索群组
+func (h *UserGatewayHandler) SearchGroups(c *gin.Context) {
+	keyword := c.Query("keyword")
+	limitStr := c.DefaultQuery("limit", "20")
+	offsetStr := c.DefaultQuery("offset", "0")
+
+	limit, _ := strconv.ParseInt(limitStr, 10, 64)
+	offset, _ := strconv.ParseInt(offsetStr, 10, 64)
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	res, err := h.groupClient.SearchGroups(ctx, &grpPb.SearchGroupsRequest{
+		Keyword: keyword,
+		Limit:   limit,
+		Offset:  offset,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+	c.JSON(statusCode, res)
+}
+
+// ==================== 群加入请求相关接口 ====================
+
+// SendGroupJoinRequest 发送群加入请求
+func (h *UserGatewayHandler) SendGroupJoinRequest(c *gin.Context) {
+	var req struct {
+		GroupID string `json:"group_id" binding:"required"`
+		Message string `json:"message"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	res, err := h.groupClient.SendGroupJoinRequest(ctx, &grpPb.SendGroupJoinRequestRequest{
+		GroupId: req.GroupID,
+		Message: req.Message,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+	c.JSON(statusCode, res)
+}
+
+// HandleGroupJoinRequest 处理群加入请求（接受/拒绝）
+func (h *UserGatewayHandler) HandleGroupJoinRequest(c *gin.Context) {
+	var req struct {
+		RequestID string `json:"request_id" binding:"required"`
+		Action    int32  `json:"action" binding:"required"` // 1: 接受, 2: 拒绝
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	res, err := h.groupClient.HandleGroupJoinRequest(ctx, &grpPb.HandleGroupJoinRequestRequest{
+		RequestId: req.RequestID,
+		Action:    req.Action,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+	c.JSON(statusCode, res)
+}
+
+// GetGroupJoinRequests 获取群的加入申请列表（管理员查看）
+func (h *UserGatewayHandler) GetGroupJoinRequests(c *gin.Context) {
+	groupID := c.Param("group_id")
+	if groupID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "group_id is required"})
+		return
+	}
+
+	statusStr := c.DefaultQuery("status", "0") // 0: all, 1: pending, 2: accepted, 3: rejected
+	limitStr := c.DefaultQuery("limit", "20")
+	offsetStr := c.DefaultQuery("offset", "0")
+
+	status, _ := strconv.ParseInt(statusStr, 10, 32)
+	limit, _ := strconv.ParseInt(limitStr, 10, 64)
+	offset, _ := strconv.ParseInt(offsetStr, 10, 64)
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	res, err := h.groupClient.GetGroupJoinRequests(ctx, &grpPb.GetGroupJoinRequestsRequest{
+		GroupId: groupID,
+		Status:  int32(status),
+		Limit:   limit,
+		Offset:  offset,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+	c.JSON(statusCode, res)
+}
+
+// GetMyGroupJoinRequests 获取我的加入申请列表
+func (h *UserGatewayHandler) GetMyGroupJoinRequests(c *gin.Context) {
+	statusStr := c.DefaultQuery("status", "0") // 0: all, 1: pending, 2: accepted, 3: rejected
+	limitStr := c.DefaultQuery("limit", "20")
+	offsetStr := c.DefaultQuery("offset", "0")
+
+	status, _ := strconv.ParseInt(statusStr, 10, 32)
+	limit, _ := strconv.ParseInt(limitStr, 10, 64)
+	offset, _ := strconv.ParseInt(offsetStr, 10, 64)
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	res, err := h.groupClient.GetMyGroupJoinRequests(ctx, &grpPb.GetMyGroupJoinRequestsRequest{
+		Status: int32(status),
+		Limit:  limit,
+		Offset: offset,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+	c.JSON(statusCode, res)
+}
+
+// ==================== 群组管理功能相关接口 ====================
+
+// UpdateGroupInfo 修改群信息
+func (h *UserGatewayHandler) UpdateGroupInfo(c *gin.Context) {
+	var req struct {
+		GroupID     string `json:"group_id" binding:"required"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Avatar      string `json:"avatar"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	res, err := h.groupClient.UpdateGroupInfo(ctx, &grpPb.UpdateGroupInfoRequest{
+		GroupId:     req.GroupID,
+		Name:        req.Name,
+		Description: req.Description,
+		Avatar:      req.Avatar,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+	c.JSON(statusCode, res)
+}
+
+// TransferGroupOwner 转让群主
+func (h *UserGatewayHandler) TransferGroupOwner(c *gin.Context) {
+	var req struct {
+		GroupID    string `json:"group_id" binding:"required"`
+		NewOwnerID string `json:"new_owner_id" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	res, err := h.groupClient.TransferOwner(ctx, &grpPb.TransferOwnerRequest{
+		GroupId:    req.GroupID,
+		NewOwnerId: req.NewOwnerID,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+	c.JSON(statusCode, res)
+}
+
+// DismissGroup 解散群组
+func (h *UserGatewayHandler) DismissGroup(c *gin.Context) {
+	groupID := c.Param("group_id")
+	if groupID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "group_id is required"})
+		return
+	}
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	res, err := h.groupClient.DismissGroup(ctx, &grpPb.DismissGroupRequest{
+		GroupId: groupID,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+	c.JSON(statusCode, res)
+}
+
+// SetGroupAdmin 设置/取消管理员
+func (h *UserGatewayHandler) SetGroupAdmin(c *gin.Context) {
+	var req struct {
+		GroupID string `json:"group_id" binding:"required"`
+		UserID  string `json:"user_id" binding:"required"`
+		IsAdmin bool   `json:"is_admin"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	res, err := h.groupClient.SetAdmin(ctx, &grpPb.SetAdminRequest{
+		GroupId: req.GroupID,
+		UserId:  req.UserID,
+		IsAdmin: req.IsAdmin,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+	c.JSON(statusCode, res)
+}
+
+// GetGroupMembers 获取群成员列表
+func (h *UserGatewayHandler) GetGroupMembers(c *gin.Context) {
+	groupID := c.Param("group_id")
+	if groupID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "group_id is required"})
+		return
+	}
+
+	limitStr := c.DefaultQuery("limit", "50")
+	offsetStr := c.DefaultQuery("offset", "0")
+
+	limit, _ := strconv.ParseInt(limitStr, 10, 64)
+	offset, _ := strconv.ParseInt(offsetStr, 10, 64)
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	res, err := h.groupClient.GetGroupMembers(ctx, &grpPb.GetGroupMembersRequest{
+		GroupId: groupID,
+		Limit:   limit,
+		Offset:  offset,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+	c.JSON(statusCode, res)
 }

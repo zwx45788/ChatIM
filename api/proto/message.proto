@@ -49,16 +49,46 @@ message SendGroupMessageResponse {
   string message = 2;
   GroupMessage msg = 3; // 返回成功存储的群聊消息详情
 }
-//拉取消息的请求
-message PullMessagesRequest{
-  int64 limit = 1;
-  int64 offset = 2;
+// 会话消息（按会话分组）
+message ConversationMessages {
+  string conversation_id = 1;   // 会话ID: "private:user_id" 或 "group:group_id"
+  string type = 2;              // 会话类型: "private" 或 "group"
+  string peer_id = 3;           // 对方用户ID或群组ID
+  string peer_name = 4;         // 对方昵称或群名（可选）
+  string peer_avatar = 5;       // 对方头像（可选）
+  int32 unread_count = 6;       // 该会话未读消息数
+  repeated UnifiedMessage messages = 7; // 该会话的消息列表
+  int64 last_message_time = 8;  // 最后一条消息时间
 }
-//拉取消息的响应
+
+// 统一消息格式（支持私聊和群聊）
+message UnifiedMessage {
+  string id = 1;               // 消息ID
+  string type = 2;             // "private" 或 "group"
+  string from_user_id = 3;     // 发送者ID
+  string from_user_name = 4;   // 发送者昵称（可选）
+  string to_user_id = 5;       // 接收者ID（私聊）
+  string group_id = 6;         // 群组ID（群聊）
+  string content = 7;          // 消息内容
+  int64 created_at = 8;        // 时间戳（秒）
+  bool is_read = 9;            // 是否已读
+  string stream_id = 10;       // Stream 消息ID（用于分页）
+}
+
+//拉取消息的请求（改为拉取按会话分组的未读消息）
+message PullMessagesRequest{
+  int64 limit = 1;             // 每个会话最多拉取的消息数（默认20）
+  bool auto_mark = 2;          // 是否自动标记为已读（默认false）
+  bool include_read = 3;       // 是否包含已读消息（默认false，只返回未读）
+}
+
+//拉取消息的响应（返回结构化的会话列表）
 message PullMessagesResponse{
   int32 code = 1;
   string message = 2;
-  repeated Message msgs = 3;
+  repeated ConversationMessages conversations = 3; // 按会话分组的消息
+  int32 total_unread = 4;      // 总未读消息数
+  int32 conversation_count = 5; // 有未读消息的会话数
 }
 
 // 标记消息已读的请求

@@ -28,6 +28,7 @@ const (
 	MessageService_PullAllUnreadOnLogin_FullMethodName     = "/proto.message.MessageService/PullAllUnreadOnLogin"
 	MessageService_MarkPrivateMessageAsRead_FullMethodName = "/proto.message.MessageService/MarkPrivateMessageAsRead"
 	MessageService_MarkGroupMessageAsRead_FullMethodName   = "/proto.message.MessageService/MarkGroupMessageAsRead"
+	MessageService_PullGroupMessages_FullMethodName        = "/proto.message.MessageService/PullGroupMessages"
 )
 
 // MessageServiceClient is the client API for MessageService service.
@@ -54,6 +55,8 @@ type MessageServiceClient interface {
 	MarkPrivateMessageAsRead(ctx context.Context, in *MarkPrivateMessageAsReadRequest, opts ...grpc.CallOption) (*MarkPrivateMessageAsReadResponse, error)
 	// 标记群聊消息已读
 	MarkGroupMessageAsRead(ctx context.Context, in *MarkGroupMessageAsReadRequest, opts ...grpc.CallOption) (*MarkGroupMessageAsReadResponse, error)
+	// 拉取群聊消息
+	PullGroupMessages(ctx context.Context, in *PullGroupMessagesRequest, opts ...grpc.CallOption) (*PullGroupMessagesResponse, error)
 }
 
 type messageServiceClient struct {
@@ -154,6 +157,16 @@ func (c *messageServiceClient) MarkGroupMessageAsRead(ctx context.Context, in *M
 	return out, nil
 }
 
+func (c *messageServiceClient) PullGroupMessages(ctx context.Context, in *PullGroupMessagesRequest, opts ...grpc.CallOption) (*PullGroupMessagesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PullGroupMessagesResponse)
+	err := c.cc.Invoke(ctx, MessageService_PullGroupMessages_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MessageServiceServer is the server API for MessageService service.
 // All implementations must embed UnimplementedMessageServiceServer
 // for forward compatibility.
@@ -178,6 +191,8 @@ type MessageServiceServer interface {
 	MarkPrivateMessageAsRead(context.Context, *MarkPrivateMessageAsReadRequest) (*MarkPrivateMessageAsReadResponse, error)
 	// 标记群聊消息已读
 	MarkGroupMessageAsRead(context.Context, *MarkGroupMessageAsReadRequest) (*MarkGroupMessageAsReadResponse, error)
+	// 拉取群聊消息
+	PullGroupMessages(context.Context, *PullGroupMessagesRequest) (*PullGroupMessagesResponse, error)
 	mustEmbedUnimplementedMessageServiceServer()
 }
 
@@ -214,6 +229,9 @@ func (UnimplementedMessageServiceServer) MarkPrivateMessageAsRead(context.Contex
 }
 func (UnimplementedMessageServiceServer) MarkGroupMessageAsRead(context.Context, *MarkGroupMessageAsReadRequest) (*MarkGroupMessageAsReadResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method MarkGroupMessageAsRead not implemented")
+}
+func (UnimplementedMessageServiceServer) PullGroupMessages(context.Context, *PullGroupMessagesRequest) (*PullGroupMessagesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PullGroupMessages not implemented")
 }
 func (UnimplementedMessageServiceServer) mustEmbedUnimplementedMessageServiceServer() {}
 func (UnimplementedMessageServiceServer) testEmbeddedByValue()                        {}
@@ -398,6 +416,24 @@ func _MessageService_MarkGroupMessageAsRead_Handler(srv interface{}, ctx context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MessageService_PullGroupMessages_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PullGroupMessagesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MessageServiceServer).PullGroupMessages(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MessageService_PullGroupMessages_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MessageServiceServer).PullGroupMessages(ctx, req.(*PullGroupMessagesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // MessageService_ServiceDesc is the grpc.ServiceDesc for MessageService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -440,6 +476,10 @@ var MessageService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "MarkGroupMessageAsRead",
 			Handler:    _MessageService_MarkGroupMessageAsRead_Handler,
+		},
+		{
+			MethodName: "PullGroupMessages",
+			Handler:    _MessageService_PullGroupMessages_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

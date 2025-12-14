@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS `messages` (
 CREATE TABLE IF NOT EXISTS `groups` (
   `id` VARCHAR(36) PRIMARY KEY,
   `name` VARCHAR(100) NOT NULL,
+  `avatar` VARCHAR(255) NULL DEFAULT NULL COMMENT '群组头像URL',
   `description` TEXT,
   `creator_id` VARCHAR(36) NOT NULL,
   `is_deleted` BOOLEAN DEFAULT FALSE,
@@ -44,6 +45,7 @@ CREATE TABLE IF NOT EXISTS `group_members` (
   `group_id` VARCHAR(36),
   `user_id` VARCHAR(36),
   `role` ENUM('admin', 'member') DEFAULT 'member',
+  `is_deleted` BOOLEAN DEFAULT FALSE COMMENT '软删除标记',
   `joined_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (group_id, user_id),
   FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
@@ -53,9 +55,9 @@ CREATE TABLE IF NOT EXISTS `group_members` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 创建 group_messages 表（群聊消息）
+-- 注意：消息顺序主要由 Redis Stream 管理，数据库仅作持久化备份
 CREATE TABLE IF NOT EXISTS `group_messages` (
   `id` VARCHAR(36) PRIMARY KEY,
-  `msg_index` BIGINT AUTO_INCREMENT UNIQUE,
   `group_id` VARCHAR(36) NOT NULL,
   `from_user_id` VARCHAR(36) NOT NULL,
   `content` TEXT NOT NULL,
@@ -63,24 +65,20 @@ CREATE TABLE IF NOT EXISTS `group_messages` (
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
   FOREIGN KEY (from_user_id) REFERENCES users(id),
-  INDEX idx_group_msg_index (group_id, msg_index DESC),
-  INDEX idx_group_created (group_id, created_at DESC),
-  INDEX idx_msg_index (msg_index)
+  INDEX idx_group_created (group_id, created_at DESC)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 创建 group_read_states 表（群聊已读状态）
+-- 注意：主要已读状态存储在 Redis Stream 中，此表仅作备份
 CREATE TABLE IF NOT EXISTS `group_read_states` (
   `group_id` VARCHAR(36),
   `user_id` VARCHAR(36),
-  `last_read_msg_index` BIGINT,
   `last_read_msg_id` VARCHAR(36),
   `last_read_at` TIMESTAMP,
-  `unread_count` INT DEFAULT 0,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (group_id, user_id),
   FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  FOREIGN KEY (last_read_msg_id) REFERENCES group_messages(id),
-  INDEX idx_user_groups (user_id, unread_count),
+  INDEX idx_user_groups (user_id),
   INDEX idx_group_user (group_id, user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

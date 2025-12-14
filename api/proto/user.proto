@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package user;
 
-option go_package = "github.com/your-username/your-project/api/proto/user";
+option go_package = "ChatIM/api/proto/user";
 
 service UserService {
   rpc GetUserByID (GetUserRequest) returns (GetUserResponse) {}
@@ -10,6 +10,7 @@ service UserService {
   rpc Login (LoginRequest) returns (LoginResponse); // 👈 新增登录方法
   rpc GetCurrentUser (GetCurrentUserRequest) returns (GetCurrentUserResponse);
   rpc CheckUserOnline (CheckUserOnlineRequest) returns (CheckUserOnlineResponse);
+  rpc SearchUsers (SearchUsersRequest) returns (SearchUsersResponse); // 👈 搜索用户
 }
 
 message GetUserRequest {
@@ -64,4 +65,24 @@ message CheckUserOnlineResponse {
   int32 code = 1;
   string message = 2;
   bool is_online = 3; // 核心信息：是否在线
+}
+// 搜索用户
+message SearchUsersRequest {
+  string keyword = 1;  // 搜索关键词（用户名或昵称）
+  int64 limit = 2;
+  int64 offset = 3;
+}
+
+message UserSearchResult {
+  string id = 1;
+  string username = 2;
+  string nickname = 3;
+  string avatar = 4;
+}
+
+message SearchUsersResponse {
+  int32 code = 1;
+  string message = 2;
+  repeated UserSearchResult users = 3;
+  int32 total = 4;
 }

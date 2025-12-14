@@ -75,6 +75,23 @@ func main() {
 			protected.DELETE("/groups/:group_id", userHandler.LeaveGroup)
 			protected.POST("/groups/messages", userHandler.SendGroupMessage) // 📌 发送群聊消息
 
+			// ========== 群加入请求相关路由 ==========
+			protected.POST("/groups/join-requests", userHandler.SendGroupJoinRequest)          // 📌 发送加群申请
+			protected.POST("/groups/join-requests/handle", userHandler.HandleGroupJoinRequest) // 📌 处理加群申请（接受/拒绝）
+			protected.GET("/groups/:group_id/join-requests", userHandler.GetGroupJoinRequests) // 📌 获取群的加入申请列表（管理员）
+			protected.GET("/groups/join-requests/my", userHandler.GetMyGroupJoinRequests)      // 📌 获取我的加入申请列表
+
+			// ========== 群组管理功能路由 ==========
+			protected.PUT("/groups/:group_id/info", userHandler.UpdateGroupInfo)         // 📌 修改群信息
+			protected.POST("/groups/:group_id/transfer", userHandler.TransferGroupOwner) // 📌 转让群主
+			protected.POST("/groups/:group_id/dismiss", userHandler.DismissGroup)        // 📌 解散群组
+			protected.POST("/groups/:group_id/admin", userHandler.SetGroupAdmin)         // 📌 设置/取消管理员
+			protected.GET("/groups/:group_id/members", userHandler.GetGroupMembers)      // 📌 获取群成员列表
+
+			// ========== 搜索功能路由 ==========
+			protected.GET("/search/users", userHandler.SearchUsers)   // 📌 搜索用户
+			protected.GET("/search/groups", userHandler.SearchGroups) // 📌 搜索群组
+
 			// ========== 会话列表相关路由 ==========
 			protected.GET("/conversations", conversationHandler.GetConversationList)                       // 📌 获取会话列表
 			protected.POST("/conversations/:conversation_id/pin", conversationHandler.PinConversation)     // 📌 置顶会话

@@ -235,3 +235,81 @@ func (h *UserHandler) CheckUserOnline(ctx context.Context, req *pb.CheckUserOnli
 		IsOnline: isOnline,
 	}, nil
 }
+
+// SearchUsers 搜索用户
+func (h *UserHandler) SearchUsers(ctx context.Context, req *pb.SearchUsersRequest) (*pb.SearchUsersResponse, error) {
+	log.Printf("Searching users with keyword: %s", req.Keyword)
+
+	// 设置默认值
+	if req.Limit <= 0 || req.Limit > 100 {
+		req.Limit = 20
+	}
+	if req.Offset < 0 {
+		req.Offset = 0
+	}
+
+	// 如果关键词为空，返回空结果
+	if req.Keyword == "" {
+		return &pb.SearchUsersResponse{
+			Code:    0,
+			Message: "搜索成功",
+			Users:   []*pb.UserSearchResult{},
+			Total:   0,
+		}, nil
+	}
+
+	// 搜索用户（用户名或昵称包含关键词）
+	keyword := "%" + req.Keyword + "%"
+	query := `
+		SELECT id, username, IFNULL(nickname, ''), IFNULL(avatar, '')
+		FROM users
+		WHERE (username LIKE ? OR nickname LIKE ?)
+		ORDER BY 
+			CASE 
+				WHEN username = ? THEN 1
+				WHEN username LIKE ? THEN 2
+				ELSE 3
+			END,
+			username ASC
+		LIMIT ? OFFSET ?`
+
+	rows, err := h.db.QueryContext(ctx, query,
+		keyword, keyword,
+		req.Keyword, req.Keyword+"%",
+		req.Limit, req.Offset)
+	if err != nil {
+		log.Printf("Failed to search users: %v", err)
+		return &pb.SearchUsersResponse{
+			Code:    -1,
+			Message: "搜索失败",
+			Users:   []*pb.UserSearchResult{},
+			Total:   0,
+		}, nil
+	}
+	defer rows.Close()
+
+	var users []*pb.UserSearchResult
+	for rows.Next() {
+		var user pb.UserSearchResult
+		err := rows.Scan(&user.Id, &user.Username, &user.Nickname, &user.Avatar)
+		if err != nil {
+			log.Printf("Failed to scan user row: %v", err)
+			continue
+		}
+		users = append(users, &user)
+	}
+
+	// 查询总数
+	var total int32
+	countQuery := `SELECT COUNT(*) FROM users WHERE (username LIKE ? OR nickname LIKE ?)`
+	h.db.QueryRowContext(ctx, countQuery, keyword, keyword).Scan(&total)
+
+	log.Printf("Found %d users matching keyword: %s", len(users), req.Keyword)
+
+	return &pb.SearchUsersResponse{
+		Code:    0,
+		Message: "搜索成功",
+		Users:   users,
+		Total:   total,
+	}, nil
+}

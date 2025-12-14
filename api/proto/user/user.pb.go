@@ -575,6 +575,203 @@ func (x *CheckUserOnlineResponse) GetIsOnline() bool {
 	return false
 }
 
+// 搜索用户
+type SearchUsersRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Keyword       string                 `protobuf:"bytes,1,opt,name=keyword,proto3" json:"keyword,omitempty"` // 搜索关键词（用户名或昵称）
+	Limit         int64                  `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"`
+	Offset        int64                  `protobuf:"varint,3,opt,name=offset,proto3" json:"offset,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SearchUsersRequest) Reset() {
+	*x = SearchUsersRequest{}
+	mi := &file_user_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SearchUsersRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SearchUsersRequest) ProtoMessage() {}
+
+func (x *SearchUsersRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_user_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SearchUsersRequest.ProtoReflect.Descriptor instead.
+func (*SearchUsersRequest) Descriptor() ([]byte, []int) {
+	return file_user_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *SearchUsersRequest) GetKeyword() string {
+	if x != nil {
+		return x.Keyword
+	}
+	return ""
+}
+
+func (x *SearchUsersRequest) GetLimit() int64 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *SearchUsersRequest) GetOffset() int64 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+type UserSearchResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Username      string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	Nickname      string                 `protobuf:"bytes,3,opt,name=nickname,proto3" json:"nickname,omitempty"`
+	Avatar        string                 `protobuf:"bytes,4,opt,name=avatar,proto3" json:"avatar,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UserSearchResult) Reset() {
+	*x = UserSearchResult{}
+	mi := &file_user_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UserSearchResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UserSearchResult) ProtoMessage() {}
+
+func (x *UserSearchResult) ProtoReflect() protoreflect.Message {
+	mi := &file_user_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UserSearchResult.ProtoReflect.Descriptor instead.
+func (*UserSearchResult) Descriptor() ([]byte, []int) {
+	return file_user_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *UserSearchResult) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *UserSearchResult) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *UserSearchResult) GetNickname() string {
+	if x != nil {
+		return x.Nickname
+	}
+	return ""
+}
+
+func (x *UserSearchResult) GetAvatar() string {
+	if x != nil {
+		return x.Avatar
+	}
+	return ""
+}
+
+type SearchUsersResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int32                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Users         []*UserSearchResult    `protobuf:"bytes,3,rep,name=users,proto3" json:"users,omitempty"`
+	Total         int32                  `protobuf:"varint,4,opt,name=total,proto3" json:"total,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SearchUsersResponse) Reset() {
+	*x = SearchUsersResponse{}
+	mi := &file_user_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SearchUsersResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SearchUsersResponse) ProtoMessage() {}
+
+func (x *SearchUsersResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_user_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SearchUsersResponse.ProtoReflect.Descriptor instead.
+func (*SearchUsersResponse) Descriptor() ([]byte, []int) {
+	return file_user_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *SearchUsersResponse) GetCode() int32 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *SearchUsersResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *SearchUsersResponse) GetUsers() []*UserSearchResult {
+	if x != nil {
+		return x.Users
+	}
+	return nil
+}
+
+func (x *SearchUsersResponse) GetTotal() int32 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
+}
+
 var File_user_proto protoreflect.FileDescriptor
 
 const file_user_proto_rawDesc = "" +
@@ -614,14 +811,29 @@ const file_user_proto_rawDesc = "" +
 	"\x17CheckUserOnlineResponse\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1b\n" +
-	"\tis_online\x18\x03 \x01(\bR\bisOnline2\xdb\x02\n" +
+	"\tis_online\x18\x03 \x01(\bR\bisOnline\"\\\n" +
+	"\x12SearchUsersRequest\x12\x18\n" +
+	"\akeyword\x18\x01 \x01(\tR\akeyword\x12\x14\n" +
+	"\x05limit\x18\x02 \x01(\x03R\x05limit\x12\x16\n" +
+	"\x06offset\x18\x03 \x01(\x03R\x06offset\"r\n" +
+	"\x10UserSearchResult\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
+	"\busername\x18\x02 \x01(\tR\busername\x12\x1a\n" +
+	"\bnickname\x18\x03 \x01(\tR\bnickname\x12\x16\n" +
+	"\x06avatar\x18\x04 \x01(\tR\x06avatar\"\x87\x01\n" +
+	"\x13SearchUsersResponse\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12,\n" +
+	"\x05users\x18\x03 \x03(\v2\x16.user.UserSearchResultR\x05users\x12\x14\n" +
+	"\x05total\x18\x04 \x01(\x05R\x05total2\x9f\x03\n" +
 	"\vUserService\x12<\n" +
 	"\vGetUserByID\x12\x14.user.GetUserRequest\x1a\x15.user.GetUserResponse\"\x00\x12?\n" +
 	"\n" +
 	"CreateUser\x12\x17.user.CreateUserRequest\x1a\x18.user.CreateUserResponse\x120\n" +
 	"\x05Login\x12\x12.user.LoginRequest\x1a\x13.user.LoginResponse\x12K\n" +
 	"\x0eGetCurrentUser\x12\x1b.user.GetCurrentUserRequest\x1a\x1c.user.GetCurrentUserResponse\x12N\n" +
-	"\x0fCheckUserOnline\x12\x1c.user.CheckUserOnlineRequest\x1a\x1d.user.CheckUserOnlineResponseB6Z4github.com/your-username/your-project/api/proto/userb\x06proto3"
+	"\x0fCheckUserOnline\x12\x1c.user.CheckUserOnlineRequest\x1a\x1d.user.CheckUserOnlineResponse\x12B\n" +
+	"\vSearchUsers\x12\x18.user.SearchUsersRequest\x1a\x19.user.SearchUsersResponseB\x17Z\x15ChatIM/api/proto/userb\x06proto3"
 
 var (
 	file_user_proto_rawDescOnce sync.Once
@@ -635,7 +847,7 @@ func file_user_proto_rawDescGZIP() []byte {
 	return file_user_proto_rawDescData
 }
 
-var file_user_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_user_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_user_proto_goTypes = []any{
 	(*GetUserRequest)(nil),          // 0: user.GetUserRequest
 	(*GetUserResponse)(nil),         // 1: user.GetUserResponse
@@ -647,23 +859,29 @@ var file_user_proto_goTypes = []any{
 	(*GetCurrentUserResponse)(nil),  // 7: user.GetCurrentUserResponse
 	(*CheckUserOnlineRequest)(nil),  // 8: user.CheckUserOnlineRequest
 	(*CheckUserOnlineResponse)(nil), // 9: user.CheckUserOnlineResponse
+	(*SearchUsersRequest)(nil),      // 10: user.SearchUsersRequest
+	(*UserSearchResult)(nil),        // 11: user.UserSearchResult
+	(*SearchUsersResponse)(nil),     // 12: user.SearchUsersResponse
 }
 var file_user_proto_depIdxs = []int32{
-	0, // 0: user.UserService.GetUserByID:input_type -> user.GetUserRequest
-	2, // 1: user.UserService.CreateUser:input_type -> user.CreateUserRequest
-	4, // 2: user.UserService.Login:input_type -> user.LoginRequest
-	6, // 3: user.UserService.GetCurrentUser:input_type -> user.GetCurrentUserRequest
-	8, // 4: user.UserService.CheckUserOnline:input_type -> user.CheckUserOnlineRequest
-	1, // 5: user.UserService.GetUserByID:output_type -> user.GetUserResponse
-	3, // 6: user.UserService.CreateUser:output_type -> user.CreateUserResponse
-	5, // 7: user.UserService.Login:output_type -> user.LoginResponse
-	7, // 8: user.UserService.GetCurrentUser:output_type -> user.GetCurrentUserResponse
-	9, // 9: user.UserService.CheckUserOnline:output_type -> user.CheckUserOnlineResponse
-	5, // [5:10] is the sub-list for method output_type
-	0, // [0:5] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	11, // 0: user.SearchUsersResponse.users:type_name -> user.UserSearchResult
+	0,  // 1: user.UserService.GetUserByID:input_type -> user.GetUserRequest
+	2,  // 2: user.UserService.CreateUser:input_type -> user.CreateUserRequest
+	4,  // 3: user.UserService.Login:input_type -> user.LoginRequest
+	6,  // 4: user.UserService.GetCurrentUser:input_type -> user.GetCurrentUserRequest
+	8,  // 5: user.UserService.CheckUserOnline:input_type -> user.CheckUserOnlineRequest
+	10, // 6: user.UserService.SearchUsers:input_type -> user.SearchUsersRequest
+	1,  // 7: user.UserService.GetUserByID:output_type -> user.GetUserResponse
+	3,  // 8: user.UserService.CreateUser:output_type -> user.CreateUserResponse
+	5,  // 9: user.UserService.Login:output_type -> user.LoginResponse
+	7,  // 10: user.UserService.GetCurrentUser:output_type -> user.GetCurrentUserResponse
+	9,  // 11: user.UserService.CheckUserOnline:output_type -> user.CheckUserOnlineResponse
+	12, // 12: user.UserService.SearchUsers:output_type -> user.SearchUsersResponse
+	7,  // [7:13] is the sub-list for method output_type
+	1,  // [1:7] is the sub-list for method input_type
+	1,  // [1:1] is the sub-list for extension type_name
+	1,  // [1:1] is the sub-list for extension extendee
+	0,  // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_user_proto_init() }
@@ -677,7 +895,7 @@ func file_user_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_user_proto_rawDesc), len(file_user_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

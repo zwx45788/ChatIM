@@ -1,0 +1,334 @@
+syntax = "proto3";
+
+package group;
+option go_package = "ChatIM/api/proto/group";
+
+// 群组相关消息定义
+
+message CreateGroupRequest {
+  string name = 1;
+  string description = 2;
+  repeated string member_ids = 3;  // 初始成员ID列表
+}
+
+message CreateGroupResponse {
+  int32 code = 1;
+  string message = 2;
+  string group_id = 3;
+}
+
+message GroupInfo {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  string creator_id = 4;
+  int64 created_at = 5;
+  int32 member_count = 6;
+}
+
+message GetGroupInfoRequest {
+  string group_id = 1;
+}
+
+message GetGroupInfoResponse {
+  int32 code = 1;
+  string message = 2;
+  GroupInfo group = 3;
+}
+
+message GroupMessage {
+  string id = 1;
+  string group_id = 2;
+  string from_user_id = 3;
+  string content = 4;
+  string msg_type = 5;  // text, image, file, notice
+  int64 created_at = 6;
+}
+
+message SendGroupMessageRequest {
+  string group_id = 1;
+  string content = 2;
+  string msg_type = 3;
+}
+
+message SendGroupMessageResponse {
+  int32 code = 1;
+  string message = 2;
+  GroupMessage msg = 3;
+}
+
+message PullGroupMessagesRequest {
+  string group_id = 1;
+  int64 limit = 2;
+  int64 offset = 3;
+  string before_msg_id = 4;  // 用于翻页，查询该消息之前的消息
+}
+
+message PullGroupMessagesResponse {
+  int32 code = 1;
+  string message = 2;
+  repeated GroupMessage msgs = 3;
+}
+
+message PullGroupUnreadMessagesRequest {
+  string group_id = 1;
+  int64 limit = 2;
+}
+
+message PullGroupUnreadMessagesResponse {
+  int32 code = 1;
+  string message = 2;
+  repeated GroupMessage msgs = 3;
+  int32 total_unread = 4;
+}
+
+message GetGroupUnreadCountRequest {
+  string group_id = 1;
+}
+
+message GetGroupUnreadCountResponse {
+  int32 code = 1;
+  string message = 2;
+  int32 unread_count = 3;
+}
+
+message AddGroupMemberRequest {
+  string group_id = 1;
+  repeated string user_ids = 2;
+}
+
+message AddGroupMemberResponse {
+  int32 code = 1;
+  string message = 2;
+  int32 added_count = 3;
+}
+
+message RemoveGroupMemberRequest {
+  string group_id = 1;
+  repeated string user_ids = 2;
+}
+
+message RemoveGroupMemberResponse {
+  int32 code = 1;
+  string message = 2;
+  int32 removed_count = 3;
+}
+
+message LeaveGroupRequest {
+  string group_id = 1;
+}
+
+message LeaveGroupResponse {
+  int32 code = 1;
+  string message = 2;
+}
+
+message ListGroupsRequest {
+  int64 limit = 1;
+  int64 offset = 2;
+}
+
+message ListGroupsResponse {
+  int32 code = 1;
+  string message = 2;
+  repeated GroupInfo groups = 3;
+  int32 total = 4;
+}
+
+message GroupUnreadInfo {
+  string group_id = 1;
+  string group_name = 2;
+  int32 unread_count = 3;
+  repeated GroupMessage latest_messages = 4;  // 最新的几条未读消息
+}
+
+message PullAllGroupsUnreadMessagesRequest {
+  int64 limit = 1;  // 每个群最多拉取多少条未读消息
+}
+
+message PullAllGroupsUnreadMessagesResponse {
+  int32 code = 1;
+  string message = 2;
+  repeated GroupUnreadInfo group_unreads = 3;  // 每个群的未读信息
+  int32 total_unread_count = 4;  // 所有群的总未读数
+}
+
+// ==================== 群加入请求相关 ====================
+
+message SendGroupJoinRequestRequest {
+  string group_id = 1;
+  string message = 2;  // 申请信息
+}
+
+message SendGroupJoinRequestResponse {
+  int32 code = 1;
+  string message = 2;
+  string request_id = 3;
+}
+
+message GroupJoinRequest {
+  string id = 1;
+  string group_id = 2;
+  string from_user_id = 3;
+  string from_username = 4;  // 申请者用户名
+  string message = 5;  // 申请信息
+  string status = 6;  // pending, accepted, rejected, cancelled
+  string reviewed_by = 7;  // 处理者ID
+  int64 created_at = 8;
+  int64 processed_at = 9;
+}
+
+message HandleGroupJoinRequestRequest {
+  string request_id = 1;
+  int32 action = 2;  // 1=接受, 2=拒绝
+}
+
+message HandleGroupJoinRequestResponse {
+  int32 code = 1;
+  string message = 2;
+}
+
+message GetGroupJoinRequestsRequest {
+  string group_id = 1;
+  int32 status = 2;  // 0=all, 1=pending, 2=accepted, 3=rejected
+  int64 limit = 3;
+  int64 offset = 4;
+}
+
+message GetGroupJoinRequestsResponse {
+  int32 code = 1;
+  string message = 2;
+  repeated GroupJoinRequest requests = 3;
+  int32 total = 4;
+}
+
+message GetMyGroupJoinRequestsRequest {
+  int32 status = 1;  // 0=all, 1=pending, 2=accepted, 3=rejected
+  int64 limit = 2;
+  int64 offset = 3;
+}
+
+message GetMyGroupJoinRequestsResponse {
+  int32 code = 1;
+  string message = 2;
+  repeated GroupJoinRequest requests = 3;
+  int32 total = 4;
+}
+
+// ==================== 群组管理功能 ====================
+
+message UpdateGroupInfoRequest {
+  string group_id = 1;
+  string name = 2;  // 可选，为空则不更新
+  string description = 3;  // 可选，为空则不更新
+  string avatar = 4;  // 可选，为空则不更新
+}
+
+message UpdateGroupInfoResponse {
+  int32 code = 1;
+  string message = 2;
+}
+
+message TransferOwnerRequest {
+  string group_id = 1;
+  string new_owner_id = 2;
+}
+
+message TransferOwnerResponse {
+  int32 code = 1;
+  string message = 2;
+}
+
+message DismissGroupRequest {
+  string group_id = 1;
+}
+
+message DismissGroupResponse {
+  int32 code = 1;
+  string message = 2;
+}
+
+message SetAdminRequest {
+  string group_id = 1;
+  string user_id = 2;
+  bool is_admin = 3;  // true=设置为管理员, false=取消管理员
+}
+
+message SetAdminResponse {
+  int32 code = 1;
+  string message = 2;
+}
+
+message GetGroupMembersRequest {
+  string group_id = 1;
+  int64 limit = 2;
+  int64 offset = 3;
+}
+
+message GroupMember {
+  string user_id = 1;
+  string username = 2;
+  string nickname = 3;
+  string role = 4;  // admin, member
+  int64 joined_at = 5;
+}
+
+message GetGroupMembersResponse {
+  int32 code = 1;
+  string message = 2;
+  repeated GroupMember members = 3;
+  int32 total = 4;
+}
+
+// ==================== 搜索功能 ====================
+
+message SearchGroupsRequest {
+  string keyword = 1;  // 搜索关键词（群名称或描述）
+  int64 limit = 2;
+  int64 offset = 3;
+}
+
+message GroupSearchResult {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  string avatar = 4;
+  int32 member_count = 5;
+}
+
+message SearchGroupsResponse {
+  int32 code = 1;
+  string message = 2;
+  repeated GroupSearchResult groups = 3;
+  int32 total = 4;
+}
+
+service GroupService {
+  rpc CreateGroup(CreateGroupRequest) returns (CreateGroupResponse);
+  rpc GetGroupInfo(GetGroupInfoRequest) returns (GetGroupInfoResponse);
+  rpc SendGroupMessage(SendGroupMessageRequest) returns (SendGroupMessageResponse);
+  rpc PullGroupMessages(PullGroupMessagesRequest) returns (PullGroupMessagesResponse);
+  rpc PullGroupUnreadMessages(PullGroupUnreadMessagesRequest) returns (PullGroupUnreadMessagesResponse);
+  rpc GetGroupUnreadCount(GetGroupUnreadCountRequest) returns (GetGroupUnreadCountResponse);
+  rpc AddGroupMember(AddGroupMemberRequest) returns (AddGroupMemberResponse);
+  rpc RemoveGroupMember(RemoveGroupMemberRequest) returns (RemoveGroupMemberResponse);
+  rpc LeaveGroup(LeaveGroupRequest) returns (LeaveGroupResponse);
+  rpc ListGroups(ListGroupsRequest) returns (ListGroupsResponse);
+  rpc PullAllGroupsUnreadMessages(PullAllGroupsUnreadMessagesRequest) returns (PullAllGroupsUnreadMessagesResponse);
+  
+  // 群加入请求相关
+  rpc SendGroupJoinRequest(SendGroupJoinRequestRequest) returns (SendGroupJoinRequestResponse);
+  rpc HandleGroupJoinRequest(HandleGroupJoinRequestRequest) returns (HandleGroupJoinRequestResponse);
+  rpc GetGroupJoinRequests(GetGroupJoinRequestsRequest) returns (GetGroupJoinRequestsResponse);
+  rpc GetMyGroupJoinRequests(GetMyGroupJoinRequestsRequest) returns (GetMyGroupJoinRequestsResponse);
+  
+  // 群组管理功能
+  rpc UpdateGroupInfo(UpdateGroupInfoRequest) returns (UpdateGroupInfoResponse);
+  rpc TransferOwner(TransferOwnerRequest) returns (TransferOwnerResponse);
+  rpc DismissGroup(DismissGroupRequest) returns (DismissGroupResponse);
+  rpc SetAdmin(SetAdminRequest) returns (SetAdminResponse);
+  rpc GetGroupMembers(GetGroupMembersRequest) returns (GetGroupMembersResponse);
+  
+  // 搜索功能
+  rpc SearchGroups(SearchGroupsRequest) returns (SearchGroupsResponse);
+}

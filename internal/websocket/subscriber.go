@@ -6,7 +6,6 @@ import (
 	"log"
 
 	"ChatIM/pkg/config"
-	"ChatIM/pkg/database"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -56,7 +55,7 @@ func StartSubscriber(hub *Hub) {
 	})
 
 	// 启动消息通知订阅（私聊和群聊统一通知）
-	go subscribePrivateMessages(hub, rdb, cfg)
+	go subscribePrivateMessages(hub, rdb)
 
 	log.Println("✅ Subscriber started - unified stream architecture (private + group)")
 }
@@ -64,7 +63,7 @@ func StartSubscriber(hub *Hub) {
 // subscribePrivateMessages 订阅消息通知（私聊 + 群聊统一）
 // 现在私聊和群聊消息都写入用户的 stream:private:{user_id}
 // 通过 "type" 字段区分消息类型："private" 或 "group"
-func subscribePrivateMessages(hub *Hub, rdb *redis.Client, cfg *config.Config) {
+func subscribePrivateMessages(hub *Hub, rdb *redis.Client) {
 	pubsub := rdb.Subscribe(context.Background(), "message_notifications")
 	defer pubsub.Close()
 
@@ -74,81 +73,56 @@ func subscribePrivateMessages(hub *Hub, rdb *redis.Client, cfg *config.Config) {
 	for msg := range ch {
 		log.Printf("📨 Message notification: %s", msg.Payload)
 
-		var notification map[string]string
+		var notification map[string]interface{}
 		if err := json.Unmarshal([]byte(msg.Payload), &notification); err != nil {
 			log.Printf("Failed to unmarshal notification: %v", err)
 			continue
 		}
 
-		toUserID := notification["to_user_id"]
-		msgID := notification["msg_id"]
-		msgType := notification["type"] // "private" 或 "group"
-
-		// 从数据库查询完整消息
-		var messageJSON []byte
-		var err error
-
-		if msgType == "group" {
-			// 群聊消息
-			groupMsg, err := fetchGroupMessageFromDB(msgID, cfg)
-			if err != nil {
-				log.Printf("Failed to fetch group message %s from DB: %v", msgID, err)
-				continue
-			}
-			messageJSON, err = json.Marshal(groupMsg)
-		} else {
-			// 私聊消息（默认）
-			privateMsg, err := fetchMessageFromDB(msgID, cfg)
-			if err != nil {
-				log.Printf("Failed to fetch message %s from DB: %v", msgID, err)
-				continue
-			}
-			messageJSON, err = json.Marshal(privateMsg)
-		}
-
-		if err != nil {
-			log.Printf("Failed to marshal message: %v", err)
+		toUserID, ok := notification["to_user_id"].(string)
+		if !ok {
+			log.Printf("Invalid to_user_id in notification")
 			continue
 		}
 
-		hub.NotifyUser(toUserID, messageJSON)
+		msgType, _ := notification["type"].(string)
+
+		// 构建推送消息（直接使用通知中的数据，无需查询数据库）
+		var pushMessage map[string]interface{}
+
+		if msgType == "group" {
+			// 群聊消息
+			pushMessage = map[string]interface{}{
+				"type":         "group",
+				"id":           notification["msg_id"],
+				"group_id":     notification["group_id"],
+				"from_user_id": notification["from_user_id"],
+				"content":      notification["content"],
+				"created_at":   notification["created_at"],
+			}
+		} else {
+			// 私聊消息（默认）
+			pushMessage = map[string]interface{}{
+				"type":         "private",
+				"id":           notification["msg_id"],
+				"from_user_id": notification["from_user_id"],
+				"to_user_id":   notification["to_user_id"],
+				"content":      notification["content"],
+				"created_at":   notification["created_at"],
+			}
+		}
+
+		messageJSON, err := json.Marshal(pushMessage)
+		if err != nil {
+			log.Printf("Failed to marshal push message: %v", err)
+			continue
+		}
+
+		// 推送给目标用户
+		hub.SendMessageToUser(toUserID, messageJSON)
+		log.Printf("✅ Message pushed to user %s via WebSocket", toUserID)
 	}
 }
 
-// fetchMessageFromDB 从数据库查询私聊消息的辅助函数
-func fetchMessageFromDB(msgID string, cfg *config.Config) (*MessagePayload, error) {
-	db, err := database.InitDB(cfg.Database.MySQL.DSN)
-	if err != nil {
-		return nil, err
-	}
-	defer db.Close()
-
-	var message MessagePayload
-	query := `SELECT id, from_user_id, to_user_id, content, created_at FROM messages WHERE id = ?`
-	err = db.QueryRow(query, msgID).Scan(&message.ID, &message.FromUserID, &message.ToUserID, &message.Content, &message.CreatedAt)
-	if err != nil {
-		return nil, err
-	}
-
-	message.Type = "private"
-	return &message, nil
-}
-
-// fetchGroupMessageFromDB 从数据库查询群聊消息
-func fetchGroupMessageFromDB(msgID string, cfg *config.Config) (*GroupMessagePayload, error) {
-	db, err := database.InitDB(cfg.Database.MySQL.DSN)
-	if err != nil {
-		return nil, err
-	}
-	defer db.Close()
-
-	var message GroupMessagePayload
-	query := `SELECT id, group_id, from_user_id, content, created_at FROM group_messages WHERE id = ?`
-	err = db.QueryRow(query, msgID).Scan(&message.ID, &message.GroupID, &message.FromUserID, &message.Content, &message.CreatedAt)
-	if err != nil {
-		return nil, err
-	}
-
-	message.Type = "group"
-	return &message, nil
-}
+// 已移除 fetchMessageFromDB 和 fetchGroupMessageFromDB 函数
+// 现在直接使用 Redis 通知中的消息内容，无需再查询数据库，提升性能
