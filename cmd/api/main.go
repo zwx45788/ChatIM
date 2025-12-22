@@ -1,19 +1,63 @@
 package main
 
 import (
-	"log"
-
-	"github.com/gin-gonic/gin"
+	"crypto/sha256"
+	"net/http"
+	"runtime"
+	"strconv"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"ChatIM/internal/api_gateway/handler"
 	"ChatIM/internal/api_gateway/middleware"
 	"ChatIM/internal/websocket"
 	"ChatIM/pkg/config"
+	"ChatIM/pkg/logger"
+	"ChatIM/pkg/profiling"
+
+	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.uber.org/zap"
 )
 
 func main() {
-	log.Println("=== API Gateway starting ===")
+	// 加载配置
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		panic("Failed to load config: " + err.Error())
+	}
+
+	// 初始化 logger
+	if err := logger.InitLogger(logger.Config{
+		Level:      cfg.Log.Level,
+		OutputPath: cfg.Log.OutputPath,
+		DevMode:    cfg.Log.DevMode,
+	}); err != nil {
+		panic("Failed to initialize logger: " + err.Error())
+	}
+	defer logger.Sync()
+
+	logger.Info("=== API Gateway starting ===")
+
+	// 初始化 pprof 性能分析
+	profiling.InitProfiling("6060")
+
+	// 启动 Prometheus Metrics 服务（独立端口）
+	go func() {
+		metricsRouter := gin.New()
+		metricsRouter.GET("/metrics", gin.WrapH(promhttp.Handler()))
+		logger.Info("📊 Prometheus metrics server started at http://localhost:9090/metrics")
+		if err := metricsRouter.Run(":9090"); err != nil {
+			logger.Error("❌ Failed to start metrics server", zap.Error(err))
+		}
+	}()
+	// CORS：放行本地开发常见来源（包含 file:// 的 Origin: null）
 	r := gin.Default()
+	r.Use(middleware.CORSMiddleware())
+	// 添加 Prometheus 中间件
+	r.Use(middleware.PrometheusMiddleware())
+
 	hub := websocket.NewHub()
 	go hub.Run()
 	go websocket.StartSubscriber(hub)
@@ -24,29 +68,66 @@ func main() {
 	})
 	r.Static("/web", "./web")
 
-	log.Println("Creating UserGatewayHandler...")
+	logger.Info("Creating UserGatewayHandler...")
 	userHandler, err := handler.NewUserGatewayHandler()
 	if err != nil {
-		log.Fatalf("Failed to initialize user gateway handler: %v", err)
+		logger.Fatal("Failed to initialize user gateway handler", zap.Error(err))
 	}
-	log.Println("UserGatewayHandler created successfully")
+	logger.Info("UserGatewayHandler created successfully")
 
-	log.Println("Creating ConversationHandler...")
+	logger.Info("Creating ConversationHandler...")
 	conversationHandler, err := handler.NewConversationHandler()
 	if err != nil {
-		log.Fatalf("Failed to initialize conversation handler: %v", err)
+		logger.Fatal("Failed to initialize conversation handler", zap.Error(err))
 	}
-	log.Println("ConversationHandler created successfully")
-
-	log.Println("Loading config...")
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
-	}
-	log.Println("Config loaded successfully")
+	logger.Info("ConversationHandler created successfully")
 	// 设置路由
 	api := r.Group("/api/v1")
 	{
+		// CPU 压力测试端点：/api/v1/debug/cpu-burn?seconds=10&workers=0
+		// workers=0 表示使用 runtime.NumCPU()
+		api.GET("/debug/cpu-burn", func(c *gin.Context) {
+			secStr := c.DefaultQuery("seconds", "10")
+			workersStr := c.DefaultQuery("workers", "0")
+			seconds, err := strconv.Atoi(secStr)
+			if err != nil || seconds <= 0 {
+				seconds = 10
+			}
+			workers, err := strconv.Atoi(workersStr)
+			if err != nil || workers <= 0 {
+				workers = runtime.NumCPU()
+			}
+
+			deadline := time.Now().Add(time.Duration(seconds) * time.Second)
+			var ops uint64
+			var wg sync.WaitGroup
+
+			for i := 0; i < workers; i++ {
+				wg.Add(1)
+				go func(id int) {
+					defer wg.Done()
+					// 纯CPU计算：重复sha256，尽量少内存分配
+					sum := [32]byte{}
+					data := []byte{byte(id)}
+					for time.Now().Before(deadline) {
+						h := sha256.Sum256(append(data, sum[0]))
+						sum = h
+						atomic.AddUint64(&ops, 1)
+					}
+				}(i)
+			}
+
+			wg.Wait()
+			c.JSON(http.StatusOK, gin.H{
+				"workers":     workers,
+				"seconds":     seconds,
+				"ops":         ops,
+				"gomaxprocs":  runtime.GOMAXPROCS(0),
+				"num_cpu":     runtime.NumCPU(),
+				"finished_at": time.Now().Format(time.RFC3339),
+			})
+		})
+
 		api.GET("/users/:user_id", userHandler.GetUserByID)
 		api.POST("/users", userHandler.CreateUser)
 		api.POST("/login", userHandler.Login)
@@ -59,7 +140,6 @@ func main() {
 			// protected.PUT("/users/me", userHandler.UpdateCurrentUser)
 			protected.POST("/messages/send", userHandler.SendMessage)
 			protected.GET("/messages", userHandler.PullMessage)
-			protected.POST("/messages/read", userHandler.MarkMessagesAsRead)
 			protected.GET("/messages/unread", userHandler.GetUnreadCount)
 			protected.GET("/messages/unread/pull", userHandler.PullUnreadMessages)
 
@@ -92,16 +172,26 @@ func main() {
 			protected.GET("/search/users", userHandler.SearchUsers)   // 📌 搜索用户
 			protected.GET("/search/groups", userHandler.SearchGroups) // 📌 搜索群组
 
+			// ========== 文件上传路由 ==========
+			protected.GET("/upload/signature", userHandler.GetUploadSignature) // 📌 获取OSS上传签名
+
+			// ========== 好友相关路由 ==========
+			protected.POST("/friends/requests", userHandler.SendFriendRequest)           // 发送好友请求
+			protected.GET("/friends/requests", userHandler.GetFriendRequests)            // 获取好友请求列表
+			protected.POST("/friends/requests/handle", userHandler.ProcessFriendRequest) // 处理好友请求
+			protected.GET("/friends", userHandler.GetFriends)                            // 获取好友列表
+
 			// ========== 会话列表相关路由 ==========
 			protected.GET("/conversations", conversationHandler.GetConversationList)                       // 📌 获取会话列表
+			protected.POST("/conversations", conversationHandler.CreateConversation)                       // 📌 创建会话
 			protected.POST("/conversations/:conversation_id/pin", conversationHandler.PinConversation)     // 📌 置顶会话
 			protected.DELETE("/conversations/:conversation_id/pin", conversationHandler.UnpinConversation) // 📌 取消置顶
 			protected.DELETE("/conversations/:conversation_id", conversationHandler.DeleteConversation)    // 📌 删除会话
 		}
 	}
 	r.GET("/ws", middleware.AuthMiddleware(), hub.HandleWebSocket)
-	log.Printf("API Gateway is running on :%v...", cfg.Server.APIPort)
+	logger.Info("API Gateway is running", zap.String("port", cfg.Server.APIPort))
 	if err := r.Run(cfg.Server.APIPort); err != nil {
-		log.Fatalf("Failed to run API Gateway: %v", err)
+		logger.Fatal("Failed to run API Gateway", zap.Error(err))
 	}
 }

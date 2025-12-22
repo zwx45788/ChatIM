@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log"
 	"net"
 
 	pb "ChatIM/api/proto/friendship"
@@ -9,8 +8,10 @@ import (
 	"ChatIM/internal/friendship/repository"
 	"ChatIM/pkg/config"
 	"ChatIM/pkg/database"
+	"ChatIM/pkg/logger"
 	"ChatIM/pkg/migrations"
 
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 )
@@ -19,20 +20,32 @@ func main() {
 	// 1. 加载配置
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		panic("Failed to load config: " + err.Error())
 	}
+
+	// 初始化 logger
+	if err := logger.InitLogger(logger.Config{
+		Level:      cfg.Log.Level,
+		OutputPath: cfg.Log.OutputPath,
+		DevMode:    cfg.Log.DevMode,
+	}); err != nil {
+		panic("Failed to initialize logger: " + err.Error())
+	}
+	defer logger.Sync()
+
+	logger.Info("=== Friendship Service starting ===")
 
 	// 2. 初始化数据库连接
 	db, err := database.InitDB(cfg.Database.MySQL.DSN)
 	if err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
+		logger.Fatal("Failed to initialize database", zap.Error(err))
 	}
 	defer db.Close()
 
 	// 2.5 运行数据库迁移
-	log.Println("Running database migrations...")
+	logger.Info("Running database migrations...")
 	if err := migrations.RunMigrations(db); err != nil {
-		log.Fatalf("Failed to run migrations: %v", err)
+		logger.Fatal("Failed to run migrations", zap.Error(err))
 	}
 
 	// 3. 创建 gRPC 服务器
@@ -53,11 +66,15 @@ func main() {
 	}
 	lis, err := net.Listen("tcp", port)
 	if err != nil {
-		log.Fatalf("Failed to listen on gRPC port %s: %v", port, err)
+		logger.Fatal("Failed to listen on gRPC port",
+			zap.String("port", port),
+			zap.Error(err))
 	}
-	log.Printf("Friendship gRPC server is running on %s...", port)
+
+	logger.Info("🚀 Friendship Service gRPC server started",
+		zap.String("port", port))
 
 	if err := grpcSrv.Serve(lis); err != nil {
-		log.Fatalf("Failed to serve gRPC: %v", err)
+		logger.Fatal("Failed to serve gRPC", zap.Error(err))
 	}
 }

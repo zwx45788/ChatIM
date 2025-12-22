@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -12,10 +11,12 @@ import (
 	pb "ChatIM/api/proto/user"
 	"ChatIM/internal/api_gateway/middleware"
 	"ChatIM/pkg/config"
+	"ChatIM/pkg/logger"
 	"ChatIM/pkg/stream"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -32,7 +33,7 @@ type ConversationHandler struct {
 func NewConversationHandler() (*ConversationHandler, error) {
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		log.Printf("Failed to load config for conversation handler: %v", err)
+		logger.Error("Failed to load config for conversation handler", zap.Error(err))
 		return nil, err
 	}
 
@@ -47,11 +48,11 @@ func NewConversationHandler() (*ConversationHandler, error) {
 	if userAddr == "" {
 		userAddr = "127.0.0.1" + cfg.Server.UserGRPCPort
 	}
-	log.Printf("ConversationHandler connecting to User Service at: %s", userAddr)
+	logger.Info("ConversationHandler connecting to User Service", zap.String("addr", userAddr))
 
 	userConn, err := grpc.Dial(userAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		log.Printf("Failed to connect to user service: %v", err)
+		logger.Error("Failed to connect to user service", zap.Error(err))
 		return nil, err
 	}
 
@@ -60,11 +61,11 @@ func NewConversationHandler() (*ConversationHandler, error) {
 	if groupAddr == "" {
 		groupAddr = "127.0.0.1" + cfg.Server.GroupGRPCPort
 	}
-	log.Printf("ConversationHandler connecting to Group Service at: %s", groupAddr)
+	logger.Info("ConversationHandler connecting to Group Service", zap.String("addr", groupAddr))
 
 	grpConn, err := grpc.Dial(groupAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		log.Printf("Failed to connect to group service: %v", err)
+		logger.Error("Failed to connect to group service", zap.Error(err))
 		return nil, err
 	}
 
@@ -186,6 +187,33 @@ func (h *ConversationHandler) UnpinConversation(c *gin.Context) {
 		"message": "Conversation unpinned successfully",
 	})
 }
+func (h *ConversationHandler) CreateConversation(c *gin.Context) {
+	userID, exists := middleware.GetUserIDFromContext(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User ID not found"})
+		return
+	}
+
+	var req struct {
+		ConversationID string `json:"conversation_id" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "conversation_id is required"})
+		return
+	}
+
+	err := h.streamOp.CreateConversation(c.Request.Context(), userID, req.ConversationID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create conversation"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "Conversation created successfully",
+	})
+}
 
 // DeleteConversation 删除会话
 // DELETE /api/v1/conversations/:conversation_id
@@ -257,7 +285,7 @@ func (h *ConversationHandler) getUserInfo(ctx context.Context, userID string) ma
 	// 调用 User Service 获取用户信息
 	res, err := h.userClient.GetUserByID(ctx, &pb.GetUserRequest{Id: userID})
 	if err != nil {
-		log.Printf("Failed to get user info for %s: %v", userID, err)
+		logger.Warn("Failed to get user info", zap.String("user_id", userID), zap.Error(err))
 		// 返回默认值
 		return map[string]string{
 			"nickname": "User_" + userID[len(userID)-4:],
@@ -283,7 +311,7 @@ func (h *ConversationHandler) getGroupInfo(ctx context.Context, groupID string) 
 	// 调用 Group Service 获取群组信息
 	res, err := h.groupClient.GetGroupInfo(ctx, &grpPb.GetGroupInfoRequest{GroupId: groupID})
 	if err != nil {
-		log.Printf("Failed to get group info for %s: %v", groupID, err)
+		logger.Warn("Failed to get group info", zap.String("group_id", groupID), zap.Error(err))
 		// 返回默认值
 		return map[string]string{
 			"name":   "Group_" + groupID[len(groupID)-4:],
@@ -292,7 +320,7 @@ func (h *ConversationHandler) getGroupInfo(ctx context.Context, groupID string) 
 	}
 
 	if res.Code != 0 || res.Group == nil {
-		log.Printf("Failed to get group info: %s", res.Message)
+		logger.Warn("Failed to get group info", zap.String("message", res.Message))
 		return map[string]string{
 			"name":   "Group_" + groupID[len(groupID)-4:],
 			"avatar": "",

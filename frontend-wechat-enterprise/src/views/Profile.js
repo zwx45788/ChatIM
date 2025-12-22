@@ -1,11 +1,11 @@
 import { useMainStore } from '../store.js';
-import { useRouter } from 'vue-router';
+import { router } from '../router.js';
 import { computed } from 'vue';
 
 export default {
     setup() {
         const store = useMainStore();
-        const router = useRouter();
+        
         const user = computed(() => store.user);
 
         const logout = () => {
@@ -26,7 +26,7 @@ export default {
             </div>
             
             <h2 class="text-2xl font-bold text-gray-800 mb-2">{{ user?.username }}</h2>
-            <p class="text-gray-500 mb-8">{{ user?.email || 'No email provided' }}</p>
+            <p class="text-gray-500 mb-8">{{ user?.nickname || 'No nickname' }}</p>
             
             <div class="space-y-4">
                 <div class="flex justify-between items-center p-3 bg-gray-50 rounded">

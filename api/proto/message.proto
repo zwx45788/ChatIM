@@ -91,18 +91,6 @@ message PullMessagesResponse{
   int32 conversation_count = 5; // 有未读消息的会话数
 }
 
-// 标记消息已读的请求
-message MarkMessagesAsReadRequest {
-  repeated string message_ids = 1; // 需要标记为已读的消息ID列表
-}
-
-// 标记消息已读的响应
-message MarkMessagesAsReadResponse {
-  int32 code = 1;
-  string message = 2;
-  int32 marked_count = 3; // 成功标记的消息数量
-}
-
 // 获取未读消息数的请求
 message GetUnreadCountRequest {
 }
@@ -199,8 +187,6 @@ service MessageService {
   rpc SendGroupMessage (SendGroupMessageRequest) returns (SendGroupMessageResponse);
   // 拉取消息
   rpc PullMessages (PullMessagesRequest) returns (PullMessagesResponse);
-  // 标记消息已读
-  rpc MarkMessagesAsRead (MarkMessagesAsReadRequest) returns (MarkMessagesAsReadResponse);
   // 获取未读消息数
   rpc GetUnreadCount (GetUnreadCountRequest) returns (GetUnreadCountResponse);
   // 拉取所有未读消息（新增）

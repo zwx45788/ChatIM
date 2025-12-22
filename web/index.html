@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ChatIM</title>
+  <link rel="stylesheet" href="/web/app.css" />
+</head>
+<body>
+  <div class="shell">
+    <div class="topbar">
+      <div class="brand">ChatIM</div>
+      <div class="topRight">
+        <div class="chip" id="chipWs">
+          <span class="dot" id="wsDot"></span>
+          <span class="small">WS</span>
+          <span class="mono" id="wsState">DISCONNECTED</span>
+        </div>
+        <div class="chip" id="chipMe" style="display:none">
+          <span class="small">我</span>
+          <span class="mono" id="meLabel">(未登录)</span>
+        </div>
+        <button id="btnOpenSettings" class="ghost">设置</button>
+      </div>
+    </div>
+
+    <div id="banner" class="banner" style="display:none"></div>
+
+    <!-- 登录/注册 -->
+    <div id="authView" class="authWrap">
+      <div class="authCard">
+        <h1>登录 ChatIM</h1>
+        <p class="muted">登录后进入会话列表与聊天界面</p>
+
+        <div class="authGrid">
+          <div class="authBlock">
+            <h2>登录</h2>
+            <div class="field"><label>用户名</label><input id="loginUsername" autocomplete="username" /></div>
+            <div class="field"><label>密码</label><input id="loginPassword" type="password" autocomplete="current-password" /></div>
+            <div class="actions"><button id="btnLogin" class="primary" style="width:100%">登录</button></div>
+          </div>
+
+          <div class="authBlock">
+            <h2>注册</h2>
+            <div class="field"><label>用户名</label><input id="regUsername" autocomplete="username" /></div>
+            <div class="field"><label>密码</label><input id="regPassword" type="password" autocomplete="new-password" /></div>
+            <div class="field"><label>昵称</label><input id="regNickname" autocomplete="nickname" /></div>
+            <div class="actions"><button id="btnRegister" style="width:100%">注册</button></div>
+          </div>
+        </div>
+
+        <div class="hr"></div>
+        <div class="small">
+          API Base：<span class="mono" id="apiBaseLabel">/api/v1</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 主应用 -->
+    <div id="appView" class="app" style="display:none">
+      <aside class="sidebar">
+        <div class="sideTabs" role="tablist" aria-label="侧边栏">
+          <button class="sideTab" role="tab" data-view="chats" aria-selected="true">会话</button>
+          <button class="sideTab" role="tab" data-view="friends">好友</button>
+          <button class="sideTab" role="tab" data-view="groups">群组</button>
+          <button class="sideTab" role="tab" data-view="search">搜索</button>
+        </div>
+
+        <div class="field" style="margin:10px 0 6px 0">
+          <label id="sideSearchLabel">筛选</label>
+          <input id="sideSearch" placeholder="输入关键词" />
+        </div>
+
+        <div id="sideList" class="sideList"></div>
+      </aside>
+
+      <main class="main">
+        <div class="mainHeader">
+          <div class="titleBlock">
+            <div id="mainTitle" class="mainTitle">选择一个会话</div>
+            <div id="mainSubtitle" class="mainSubtitle">消息会在这里显示</div>
+          </div>
+          <div class="mainActions">
+            <button id="btnRefresh" class="ghost">刷新</button>
+            <button id="btnPin" class="ghost" disabled>置顶/取消</button>
+            <button id="btnDeleteConv" class="ghost danger" disabled>删除</button>
+          </div>
+        </div>
+
+        <div id="mainBody" class="mainBody">
+          <div id="chatView" class="chat">
+            <div id="chatMessages" class="chatMessages"></div>
+            <div class="composer">
+              <textarea id="composerText" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+              <button id="btnSendMsg" class="primary" disabled>发送</button>
+            </div>
+          </div>
+
+          <div id="friendsView" class="pane" style="display:none">
+            <div class="paneGrid">
+              <div class="paneCard">
+                <h2>添加好友</h2>
+                <div class="field"><label>to_user_id（可填 user_id 或 username）</label><input id="friendToUserId" placeholder="例如：zwx123 或 550e8400-e29b-41d4-a716-446655440000" /></div>
+                <div class="field"><label>备注（可选）</label><input id="friendReqMsg" /></div>
+                <div class="actions"><button id="btnFriendReq" class="primary">发送好友请求</button></div>
+              </div>
+              <div class="paneCard">
+                <h2>待处理请求</h2>
+                <div class="actions">
+                  <button id="btnFriendReqList" class="ghost">刷新</button>
+                </div>
+                <div id="friendRequests" class="miniList"></div>
+              </div>
+            </div>
+          </div>
+
+          <div id="groupsView" class="pane" style="display:none">
+            <div class="paneGrid">
+              <div class="paneCard">
+                <h2>创建群组</h2>
+                <div class="field"><label>name</label><input id="groupName" /></div>
+                <div class="field"><label>description</label><input id="groupDesc" /></div>
+                <div class="field"><label>member_ids（逗号分隔，可空）</label><input id="groupMemberIds" placeholder="id1,id2" /></div>
+                <div class="actions"><button id="btnGroupCreate" class="primary">创建</button></div>
+              </div>
+              <div class="paneCard">
+                <h2>加群申请</h2>
+                <div class="field"><label>group_id（可填 group_id 或 群名称）</label><input id="groupId" placeholder="例如：开发交流群 或 550e8400-e29b-41d4-a716-446655440000" /></div>
+                <div class="field"><label>申请理由（可选）</label><input id="groupJoinMsg" /></div>
+                <div class="actions"><button id="btnGroupJoinReq">发送申请</button></div>
+                <div class="hr"></div>
+                <div class="actions"><button id="btnMyGroupJoin" class="ghost">我的申请</button></div>
+              </div>
+            </div>
+          </div>
+
+          <div id="searchView" class="pane" style="display:none">
+            <div class="paneGrid">
+              <div class="paneCard">
+                <h2>搜索用户</h2>
+                <div class="field"><label>keyword</label><input id="searchKeyword" placeholder="用户名/昵称" /></div>
+                <div class="actions"><button id="btnSearchUsers" class="primary">搜索</button></div>
+                <div id="searchUsers" class="miniList"></div>
+              </div>
+              <div class="paneCard">
+                <h2>搜索群组</h2>
+                <div class="field"><label>keyword</label><input id="searchKeyword2" placeholder="群名称/描述" /></div>
+                <div class="actions"><button id="btnSearchGroups" class="primary">搜索</button></div>
+                <div id="searchGroups" class="miniList"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- 设置抽屉 -->
+    <div id="settings" class="modal" style="display:none">
+      <div class="modalCard">
+        <div class="modalHeader">
+          <div>
+            <div class="modalTitle">设置</div>
+            <div class="small muted">Token 会保存在浏览器 localStorage</div>
+          </div>
+          <button id="btnCloseSettings" class="ghost">关闭</button>
+        </div>
+
+        <div class="field">
+          <label>API Base</label>
+          <input id="apiBase" placeholder="/api/v1" />
+        </div>
+
+        <div class="field">
+          <label>Token</label>
+          <textarea id="token" placeholder="只填 token 本体或 Bearer token 都可以"></textarea>
+        </div>
+
+        <div class="actions">
+          <button id="btnSaveCfg" class="primary">保存</button>
+          <button id="btnLogout" class="danger">退出登录</button>
+          <button id="btnWsConnect" class="ghost">连接 WS</button>
+          <button id="btnWsDisconnect" class="ghost">断开 WS</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/web/app.js"></script>
+</body>
+</html>

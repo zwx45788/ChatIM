@@ -1,4 +1,4 @@
-const API_BASE = ''; // 使用相对路径，自动适配当前域名和端口
+const API_BASE = ''; // 使用相对路径，通过服务器代理转发到后端
 
 export const api = {
     async request(endpoint, method = 'GET', body = null, token = null) {
@@ -20,9 +20,19 @@ export const api = {
 
         try {
             const response = await fetch(`${API_BASE}${endpoint}`, config);
+            
+            // 检查响应类型
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                const text = await response.text();
+                console.error('Non-JSON response:', text);
+                throw new Error('服务器返回非 JSON 响应，请检查后端服务是否正常运行');
+            }
+            
             const data = await response.json();
-            if (!response.ok) {
-                throw new Error(data.msg || data.error || 'Request failed');
+            // Check for code !== 0 as per doc
+            if (data.code !== 0) {
+                 throw new Error(data.message || data.msg || 'Request failed');
             }
             return data;
         } catch (error) {
@@ -31,85 +41,156 @@ export const api = {
         }
     },
 
-    // Auth
+    // 1. 用户管理
+    register(username, password, nickname) {
+        return this.request('/api/v1/users', 'POST', { username, password, nickname });
+    },
     login(username, password) {
         return this.request('/api/v1/login', 'POST', { username, password });
     },
-    register(username, password, email) {
-        // 后端目前只接受 username, password, nickname
-        // 我们把 email 当作 nickname 传过去，或者暂时忽略
-        return this.request('/api/v1/users', 'POST', { username, password, nickname: username });
-    },
-
-    // User
     getCurrentUser(token) {
         return this.request('/api/v1/users/me', 'GET', null, token);
     },
-    searchUser(username, token) {
-        // 后端暂无按用户名搜索接口，暂时返回空
-        // return this.request(`/api/v1/users/search?username=${username}`, 'GET', null, token);
-        return Promise.resolve({ data: [] });
+    getUserDetail(userId, token) {
+        return this.request(`/api/v1/users/${userId}`, 'GET', null, token);
+    },
+    checkUserOnline(userId, token) {
+        return this.request(`/api/v1/users/${userId}/online`, 'GET', null, token);
     },
 
-    // Friend
-    addFriend(friendId, remark, token) {
-        // 后端暂无好友接口，暂时模拟成功
-        // return this.request('/api/v1/friends', 'POST', { friend_id: parseInt(friendId), remark }, token);
-        console.warn("Add friend not implemented in backend");
-        return Promise.resolve({ code: 0, msg: "模拟添加成功" });
-    },
-    getFriends(token) {
-        // 后端暂无好友接口，暂时返回空列表
-        // return this.request('/api/v1/friends', 'GET', null, token);
-        return Promise.resolve({ data: [] });
-    },
-
-    // Group
-    createGroup(name, token) {
-        return this.request('/api/v1/groups', 'POST', { name }, token);
-    },
-    joinGroup(groupId, userId, token) {
-        // Backend expects group_id and user_ids list
-        return this.request(`/api/v1/groups/${groupId}/members`, 'POST', { 
-            group_id: groupId,
-            user_ids: [userId]
-        }, token); 
-    },
-    getGroups(token) {
-        return this.request('/api/v1/groups', 'GET', null, token);
-    },
-
-    // Message
-    sendPrivateMessage(receiverId, content, type, token) {
-        // Backend expects to_user_id and content
+    // 2. 消息管理
+    sendPrivateMessage(toUserId, content, msgType = 'text', token) {
         return this.request('/api/v1/messages/send', 'POST', { 
-            to_user_id: receiverId.toString(), 
-            content
+            to_user_id: toUserId, 
+            content, 
+            msg_type: msgType 
         }, token);
     },
-    sendGroupMessage(groupId, content, type, token) {
-        // Backend currently missing specific group message endpoint in Gateway
-        // Using temporary endpoint or placeholder
-        return this.request(`/api/v1/groups/${groupId}/messages`, 'POST', { 
-            group_id: groupId.toString(), 
-            content,
-            msg_type: type.toString()
-        }, token);
+    pullPrivateMessages(toUserId, limit = 20, token) {
+        return this.request(`/api/v1/messages?to_user_id=${toUserId}&limit=${limit}`, 'GET', null, token);
+    },
+    markMessagesRead(msgIds, token) {
+        return this.request('/api/v1/messages/read', 'POST', { msg_ids: msgIds }, token);
+    },
+    getUnreadCount(token) {
+        return this.request('/api/v1/messages/unread', 'GET', null, token);
     },
     pullPrivateUnread(token) {
-        // main.go: protected.GET("/messages/unread/pull", userHandler.PullUnreadMessages)
         return this.request('/api/v1/messages/unread/pull', 'GET', null, token);
     },
-    pullGroupUnread(token) {
-        // main.go: protected.GET("/unread/all", userHandler.PullAllUnreadMessages)
+    getAllUnread(token) {
         return this.request('/api/v1/unread/all', 'GET', null, token);
     },
+
+    // 3. 群组管理
+    createGroup(name, description, avatar, token) {
+        return this.request('/api/v1/groups', 'POST', { name, description, avatar }, token);
+    },
+    getGroupInfo(groupId, token) {
+        return this.request(`/api/v1/groups/${groupId}`, 'GET', null, token);
+    },
+    getMyGroups(token) {
+        return this.request('/api/v1/groups', 'GET', null, token);
+    },
+    addGroupMembers(groupId, userIds, token) {
+        return this.request(`/api/v1/groups/${groupId}/members`, 'POST', { user_ids: userIds }, token);
+    },
+    removeGroupMember(groupId, userId, token) {
+        return this.request(`/api/v1/groups/${groupId}/members?user_id=${userId}`, 'DELETE', null, token);
+    },
+    quitGroup(groupId, token) {
+        return this.request(`/api/v1/groups/${groupId}`, 'DELETE', null, token);
+    },
+    sendGroupMessage(groupId, content, msgType = 'text', token) {
+        return this.request('/api/v1/groups/messages', 'POST', { 
+            group_id: groupId, 
+            content, 
+            msg_type: msgType 
+        }, token);
+    },
+    getGroupMembers(groupId, token) {
+        return this.request(`/api/v1/groups/${groupId}/members`, 'GET', null, token);
+    },
+
+    // 4. 群加入请求
+    joinGroupRequest(groupId, message, token) {
+        return this.request('/api/v1/groups/join-requests', 'POST', { group_id: groupId, message }, token);
+    },
+    handleJoinRequest(requestId, action, token) {
+        return this.request('/api/v1/groups/join-requests/handle', 'POST', { request_id: requestId, action }, token);
+    },
+    getGroupJoinRequests(groupId, token) {
+        return this.request(`/api/v1/groups/${groupId}/join-requests`, 'GET', null, token);
+    },
+    getMyJoinRequests(token) {
+        return this.request('/api/v1/groups/join-requests/my', 'GET', null, token);
+    },
+
+    // 5. 群组管理功能
+    updateGroupInfo(groupId, data, token) {
+        return this.request(`/api/v1/groups/${groupId}/info`, 'PUT', data, token);
+    },
+    transferGroupOwner(groupId, newOwnerId, token) {
+        return this.request(`/api/v1/groups/${groupId}/transfer`, 'POST', { new_owner_id: newOwnerId }, token);
+    },
+    dismissGroup(groupId, token) {
+        return this.request(`/api/v1/groups/${groupId}/dismiss`, 'POST', null, token);
+    },
+    setGroupAdmin(groupId, userId, isAdmin, token) {
+        return this.request(`/api/v1/groups/${groupId}/admin`, 'POST', { user_id: userId, is_admin: isAdmin }, token);
+    },
+
+    // 6. 搜索功能
+    searchUsers(keyword, limit = 20, offset = 0, token) {
+        return this.request(`/api/v1/search/users?keyword=${encodeURIComponent(keyword)}&limit=${limit}&offset=${offset}`, 'GET', null, token);
+    },
+    searchGroups(keyword, limit = 20, offset = 0, token) {
+        return this.request(`/api/v1/search/groups?keyword=${encodeURIComponent(keyword)}&limit=${limit}&offset=${offset}`, 'GET', null, token);
+    },
+
+    // 7. 文件上传
+    getUploadSignature(type = 'image', token) {
+        return this.request(`/api/v1/upload/signature?type=${type}`, 'GET', null, token);
+    },
+
+    // 8. 会话管理
+    getConversations(token) {
+        return this.request('/api/v1/conversations', 'GET', null, token);
+    },
+    pinConversation(conversationId, token) {
+        return this.request(`/api/v1/conversations/${conversationId}/pin`, 'POST', null, token);
+    },
+    unpinConversation(conversationId, token) {
+        return this.request(`/api/v1/conversations/${conversationId}/pin`, 'DELETE', null, token);
+    },
+    deleteConversation(conversationId, token) {
+        return this.request(`/api/v1/conversations/${conversationId}`, 'DELETE', null, token);
+    },
+    
+    // Compatibility aliases
+    getGroups(token) { return this.getMyGroups(token); },
+    searchUser(keyword, token) { return this.searchUsers(keyword, 20, 0, token); },
+
+    // Friends
+    getFriends(token) {
+        return this.request('/api/v1/friends', 'GET', null, token);
+    },
+    addFriend(friendId, remark, token) {
+        return this.request('/api/v1/friends/requests', 'POST', { to_user_id: friendId, message: remark }, token);
+    },
+    
+    // Old aliases for compatibility with store.js if needed
+    joinGroup(groupId, userId, token) {
+        return this.addGroupMembers(groupId, [userId], token);
+    },
+    pullGroupUnread(token) {
+        return this.getAllUnread(token);
+    },
     markPrivateRead(messageIds, token) {
-        // Backend expects message_ids list
-        return this.request('/api/v1/messages/read', 'POST', { message_ids: messageIds }, token);
+        return this.markMessagesRead(messageIds, token);
     },
     markGroupRead(groupId, token) {
-        // Not implemented in backend yet
+        // Not implemented in backend yet, or maybe use markMessagesRead if we have message IDs
         return Promise.resolve();
     }
 };

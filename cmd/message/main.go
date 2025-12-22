@@ -3,10 +3,11 @@ package main
 import (
 	"ChatIM/pkg/config"
 	"ChatIM/pkg/database"
-	"log"
+	"ChatIM/pkg/logger"
 	"net"
 
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 
@@ -18,35 +19,53 @@ func main() {
 	// 1. 初始化数据源
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		panic("Failed to load config: " + err.Error())
 	}
+
+	// 初始化 logger
+	if err := logger.InitLogger(logger.Config{
+		Level:      cfg.Log.Level,
+		OutputPath: cfg.Log.OutputPath,
+		DevMode:    cfg.Log.DevMode,
+	}); err != nil {
+		panic("Failed to initialize logger: " + err.Error())
+	}
+	defer logger.Sync()
+
+	logger.Info("=== Message Service starting ===")
+
 	db, err := database.InitDB(cfg.Database.MySQL.DSN)
 	if err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
+		logger.Fatal("Failed to initialize database", zap.Error(err))
 	}
 	defer db.Close()
+
 	// 2. 创建 gRPC 服务器
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     cfg.Database.Redis.Addr,
 		Password: cfg.Database.Redis.Password,
 		DB:       cfg.Database.Redis.DB,
 	})
+	logger.Info("✅ Redis client initialized")
+
 	grpcSrv := grpc.NewServer()
 
-	lis, err := net.Listen("tcp", cfg.Server.MessageGRPCPort) // 👈 使用新端口 50052
+	lis, err := net.Listen("tcp", cfg.Server.MessageGRPCPort)
 	if err != nil {
-		log.Fatalf("Failed to listen on gRPC port %v: %v", cfg.Server.MessageGRPCPort, err)
+		logger.Fatal("Failed to listen on gRPC port",
+			zap.String("port", cfg.Server.MessageGRPCPort),
+			zap.Error(err))
 	}
-	log.Printf("gRPC server is running on :%v...", cfg.Server.MessageGRPCPort)
 
 	// 3. 注册服务
 	pb.RegisterMessageServiceServer(grpcSrv, handler.NewMessageHandler(db, rdb))
-
-	log.Printf("Message service is running on :%v...", cfg.Server.MessageGRPCPort)
 	reflection.Register(grpcSrv)
 
+	logger.Info("🚀 Message Service gRPC server started",
+		zap.String("port", cfg.Server.MessageGRPCPort))
+
 	if err := grpcSrv.Serve(lis); err != nil {
-		log.Fatalf("failed to serve gRPC: %v", err)
+		logger.Fatal("Failed to serve gRPC", zap.Error(err))
 	}
 
 	// // 4. 优雅启动

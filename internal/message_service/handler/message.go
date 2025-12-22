@@ -5,17 +5,18 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	pb "ChatIM/api/proto/message"
 	"ChatIM/pkg/auth"
+	"ChatIM/pkg/logger"
 	"ChatIM/pkg/stream"
 
 	"github.com/google/uuid"
@@ -43,7 +44,9 @@ func (h *MessageHandler) SendMessage(ctx context.Context, req *pb.SendMessageReq
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("User %s is sending a message to %s", fromUserID, req.ToUserId)
+	logger.Info("Sending private message",
+		zap.String("from_user_id", fromUserID),
+		zap.String("to_user_id", req.ToUserId))
 
 	msgID := uuid.New().String()
 	createdAt := time.Now().Format("2006-01-02 15:04:05")
@@ -51,7 +54,7 @@ func (h *MessageHandler) SendMessage(ctx context.Context, req *pb.SendMessageReq
 	// 1. 立即写入 Redis Stream（快速响应）
 	_, err = h.streamOp.AddPrivateMessage(ctx, msgID, fromUserID, req.ToUserId, req.Content)
 	if err != nil {
-		log.Printf("Failed to add private message to stream: %v", err)
+		logger.Error("Failed to add private message to stream", zap.Error(err))
 		return nil, status.Errorf(codes.Internal, "Failed to save message")
 	}
 
@@ -76,15 +79,17 @@ func (h *MessageHandler) SendMessage(ctx context.Context, req *pb.SendMessageReq
 
 		notificationJSON, err := json.Marshal(notification)
 		if err != nil {
-			log.Printf("Warning: failed to marshal notification: %v", err)
+			logger.Warn("Failed to marshal notification", zap.Error(err))
 			return
 		}
 
 		err = h.rdb.Publish(notificationCtx, "message_notifications", notificationJSON).Err()
 		if err != nil {
-			log.Printf("Warning: failed to publish notification: %v", err)
+			logger.Warn("Failed to publish notification", zap.Error(err))
 		} else {
-			log.Printf("✅ Notification published for message %s to user %s", msgID, req.ToUserId)
+			logger.Debug("Notification published",
+				zap.String("msg_id", msgID),
+				zap.String("to_user_id", req.ToUserId))
 		}
 	}()
 
@@ -96,13 +101,13 @@ func (h *MessageHandler) SendMessage(ctx context.Context, req *pb.SendMessageReq
 		query := `INSERT INTO messages (id, from_user_id, to_user_id, content, created_at) VALUES (?, ?, ?, ?, ?)`
 		_, err := h.db.ExecContext(dbCtx, query, msgID, fromUserID, req.ToUserId, req.Content, createdAt)
 		if err != nil {
-			log.Printf("Warning: failed to save message to database: %v", err)
+			logger.Warn("Failed to save message to database", zap.Error(err))
 		} else {
-			log.Printf("Message %s saved to database successfully", msgID)
+			logger.Debug("Message saved to database", zap.String("msg_id", msgID))
 		}
 	}()
 
-	log.Printf("Message %s sent successfully", msgID)
+	logger.Info("Message sent successfully", zap.String("msg_id", msgID))
 
 	return &pb.SendMessageResponse{
 		Code:    0,
@@ -127,7 +132,9 @@ func (h *MessageHandler) SendGroupMessage(ctx context.Context, req *pb.SendGroup
 		return nil, status.Errorf(codes.InvalidArgument, "group_id is required")
 	}
 
-	log.Printf("User %s is sending a group message to group %s", fromUserID, req.GroupId)
+	logger.Info("Sending group message",
+		zap.String("from_user_id", fromUserID),
+		zap.String("group_id", req.GroupId))
 
 	msgID := uuid.New().String()
 	createdAt := time.Now().Format("2006-01-02 15:04:05")
@@ -135,7 +142,7 @@ func (h *MessageHandler) SendGroupMessage(ctx context.Context, req *pb.SendGroup
 	// 1. 查询群成员列表
 	memberIDs, err := h.getGroupMembers(ctx, req.GroupId)
 	if err != nil {
-		log.Printf("Failed to get group members: %v", err)
+		logger.Error("Failed to get group members", zap.Error(err))
 		return nil, status.Errorf(codes.Internal, "Failed to get group members")
 	}
 
@@ -146,7 +153,7 @@ func (h *MessageHandler) SendGroupMessage(ctx context.Context, req *pb.SendGroup
 	// 2. 写入所有成员的 Redis Stream (统一使用 stream:private:{user_id})
 	err = h.streamOp.AddGroupMessageToMembers(ctx, msgID, req.GroupId, fromUserID, req.Content, "text", memberIDs)
 	if err != nil {
-		log.Printf("Failed to add group message to members' streams: %v", err)
+		logger.Error("Failed to add group message to members' streams", zap.Error(err))
 		return nil, status.Errorf(codes.Internal, "Failed to save group message")
 	}
 
@@ -179,17 +186,23 @@ func (h *MessageHandler) SendGroupMessage(ctx context.Context, req *pb.SendGroup
 
 			notificationJSON, err := json.Marshal(notification)
 			if err != nil {
-				log.Printf("Warning: failed to marshal notification for member %s: %v", memberID, err)
+				logger.Warn("Failed to marshal notification for member",
+					zap.String("member_id", memberID),
+					zap.Error(err))
 				continue
 			}
 
 			err = h.rdb.Publish(notificationCtx, "message_notifications", notificationJSON).Err()
 			if err != nil {
-				log.Printf("Warning: failed to publish notification to member %s: %v", memberID, err)
+				logger.Warn("Failed to publish notification to member",
+					zap.String("member_id", memberID),
+					zap.Error(err))
 			}
 		}
 
-		log.Printf("✅ Notifications published for group message %s to %d members", msgID, len(memberIDs)-1)
+		logger.Debug("Notifications published for group message",
+			zap.String("msg_id", msgID),
+			zap.Int("member_count", len(memberIDs)-1))
 	}()
 
 	// 5. 异步写入数据库
@@ -200,13 +213,15 @@ func (h *MessageHandler) SendGroupMessage(ctx context.Context, req *pb.SendGroup
 		query := `INSERT INTO group_messages (id, group_id, from_user_id, content, created_at) VALUES (?, ?, ?, ?, ?)`
 		_, err := h.db.ExecContext(dbCtx, query, msgID, req.GroupId, fromUserID, req.Content, createdAt)
 		if err != nil {
-			log.Printf("Warning: failed to save group message to database: %v", err)
+			logger.Warn("Failed to save group message to database", zap.Error(err))
 		} else {
-			log.Printf("Group message %s saved to database successfully", msgID)
+			logger.Debug("Group message saved to database", zap.String("msg_id", msgID))
 		}
 	}()
 
-	log.Printf("✅ Group message %s sent to %d members via their personal streams", msgID, len(memberIDs))
+	logger.Info("Group message sent",
+		zap.String("msg_id", msgID),
+		zap.Int("member_count", len(memberIDs)))
 
 	return &pb.SendGroupMessageResponse{
 		Code:    0,
@@ -234,7 +249,7 @@ func (h *MessageHandler) getGroupMembers(ctx context.Context, groupID string) ([
 		"SELECT user_id FROM group_members WHERE group_id = ? AND is_deleted = 0",
 		groupID)
 	if err != nil {
-		log.Printf("Error querying group members: %v", err)
+		logger.Error("Error querying group members", zap.Error(err))
 		return nil, err
 	}
 	defer rows.Close()
@@ -264,7 +279,7 @@ func (h *MessageHandler) PullMessages(ctx context.Context, req *pb.PullMessagesR
 		return nil, err
 	}
 
-	log.Printf("User %s is pulling messages (grouped by conversation)", userID)
+	logger.Info("Pulling messages", zap.String("user_id", userID))
 
 	// 设置默认值
 	limit := req.Limit
@@ -279,7 +294,7 @@ func (h *MessageHandler) PullMessages(ctx context.Context, req *pb.PullMessagesR
 	streamKey := fmt.Sprintf("stream:private:%s", userID)
 	messages, err := h.rdb.XRevRangeN(ctx, streamKey, "+", "-", 500).Result()
 	if err != nil {
-		log.Printf("Warning: failed to read from stream: %v", err)
+		logger.Warn("Failed to read from stream", zap.Error(err))
 	}
 
 	// 3. 按会话分组消息
@@ -382,7 +397,10 @@ func (h *MessageHandler) PullMessages(ctx context.Context, req *pb.PullMessagesR
 
 	// 注意：移除了自动标记已读逻辑，前端需要在成功接收消息后主动调用标记已读接口
 
-	log.Printf("✅ User %s pulled %d conversations with %d total unread messages", userID, len(conversations), totalUnread)
+	logger.Info("Messages pulled",
+		zap.String("user_id", userID),
+		zap.Int("conversation_count", len(conversations)),
+		zap.Int32("total_unread", totalUnread))
 
 	return &pb.PullMessagesResponse{
 		Code:              0,
@@ -414,7 +432,9 @@ func (h *MessageHandler) enrichConversationInfo(ctx context.Context, conv *pb.Co
 			conv.PeerAvatar = avatar
 		} else {
 			// 可以考虑记录日志，方便排查问题
-			log.Printf("Warning: failed to enrich private conversation %s: %v", conv.PeerId, err)
+			logger.Warn("Failed to enrich private conversation",
+				zap.String("peer_id", conv.PeerId),
+				zap.Error(err))
 		}
 
 	case "group":
@@ -426,12 +446,14 @@ func (h *MessageHandler) enrichConversationInfo(ctx context.Context, conv *pb.Co
 			conv.PeerName = name
 			conv.PeerAvatar = avatar
 		} else {
-			log.Printf("Warning: failed to enrich group conversation %s: %v", conv.PeerId, err)
+			logger.Warn("Failed to enrich group conversation",
+				zap.String("peer_id", conv.PeerId),
+				zap.Error(err))
 		}
 
 	default:
 		// 未知会话类型，记录日志
-		log.Printf("Warning: unknown conversation type: %s", conv.Type)
+		logger.Warn("Unknown conversation type", zap.String("type", conv.Type))
 	}
 
 	// 补充每条消息的发送者昵称
@@ -467,59 +489,6 @@ func getInt64(v interface{}) int64 {
 	return 0
 }
 
-// MarkMessagesAsRead 标记消息为已读
-func (h *MessageHandler) MarkMessagesAsRead(ctx context.Context, req *pb.MarkMessagesAsReadRequest) (*pb.MarkMessagesAsReadResponse, error) {
-	// 1. 验证用户身份
-	userID, err := auth.GetUserID(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	log.Printf("User %s is marking messages as read", userID)
-
-	if len(req.MessageIds) == 0 {
-		return &pb.MarkMessagesAsReadResponse{
-			Code:        0,
-			Message:     "没有需要标记的消息",
-			MarkedCount: 0,
-		}, nil
-	}
-
-	// 2. 构建批量更新 SQL（只更新接收者是当前用户的消息）
-	currentTime := time.Now().Format("2006-01-02 15:04:05")
-
-	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(req.MessageIds)), ",")
-	args := make([]interface{}, 0, len(req.MessageIds)+2)
-	args = append(args, currentTime, userID)
-	for _, msgID := range req.MessageIds {
-		args = append(args, msgID)
-	}
-
-	query := `UPDATE messages SET is_read = TRUE, read_at = ? 
-	          WHERE to_user_id = ? AND id IN (` + placeholders + `)`
-
-	result, err := h.db.ExecContext(ctx, query, args...)
-	if err != nil {
-		log.Printf("Failed to mark messages as read: %v", err)
-		return nil, status.Errorf(codes.Internal, "Failed to mark messages as read")
-	}
-
-	// 3. 获取受影响的行数
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		log.Printf("Failed to get affected rows: %v", err)
-		return nil, status.Errorf(codes.Internal, "Failed to get affected rows")
-	}
-
-	log.Printf("Successfully marked %d messages as read for user %s", rowsAffected, userID)
-
-	return &pb.MarkMessagesAsReadResponse{
-		Code:        0,
-		Message:     "消息已标记为已读",
-		MarkedCount: int32(rowsAffected),
-	}, nil
-}
-
 // GetUnreadCount 获取用户的未读消息数
 func (h *MessageHandler) GetUnreadCount(ctx context.Context, req *pb.GetUnreadCountRequest) (*pb.GetUnreadCountResponse, error) {
 	// 1. 验证用户身份
@@ -528,18 +497,22 @@ func (h *MessageHandler) GetUnreadCount(ctx context.Context, req *pb.GetUnreadCo
 		return nil, err
 	}
 
-	log.Printf("User %s is checking unread count", userID)
+	logger.Debug("Checking unread count", zap.String("user_id", userID))
 
 	// 2. 查询未读消息数
 	query := `SELECT COUNT(*) FROM messages WHERE to_user_id = ? AND is_read = FALSE`
 	var unreadCount int32
 	err = h.db.QueryRowContext(ctx, query, userID).Scan(&unreadCount)
 	if err != nil {
-		log.Printf("Failed to query unread count for user %s: %v", userID, err)
+		logger.Error("Failed to query unread count",
+			zap.String("user_id", userID),
+			zap.Error(err))
 		return nil, status.Errorf(codes.Internal, "Failed to query unread count")
 	}
 
-	log.Printf("User %s has %d unread messages", userID, unreadCount)
+	logger.Debug("Unread count retrieved",
+		zap.String("user_id", userID),
+		zap.Int32("count", unreadCount))
 
 	return &pb.GetUnreadCountResponse{
 		Code:        0,
@@ -556,7 +529,7 @@ func (h *MessageHandler) PullUnreadMessages(ctx context.Context, req *pb.PullUnr
 		return nil, err
 	}
 
-	log.Printf("User %s is pulling unread messages", userID)
+	logger.Info("Pulling unread messages", zap.String("user_id", userID))
 
 	// 设置默认 limit，并限制最大值
 	limit := req.Limit
@@ -578,7 +551,9 @@ func (h *MessageHandler) PullUnreadMessages(ctx context.Context, req *pb.PullUnr
 
 	rows, err := h.db.QueryContext(ctx, query, userID, limit)
 	if err != nil {
-		log.Printf("Failed to query unread messages for user %s: %v", userID, err)
+		logger.Error("Failed to query unread messages",
+			zap.String("user_id", userID),
+			zap.Error(err))
 		return nil, status.Errorf(codes.Internal, "Failed to query unread messages")
 	}
 	defer rows.Close()
@@ -604,13 +579,13 @@ func (h *MessageHandler) PullUnreadMessages(ctx context.Context, req *pb.PullUnr
 		)
 
 		if err := rows.Scan(&id, &fromUserID, &toUserID, &content, &isRead, &readAtStr, &createdAtStr, &rowTotal); err != nil {
-			log.Printf("Failed to scan message row: %v", err)
+			logger.Warn("Failed to scan message row", zap.Error(err))
 			continue
 		}
 
 		msg, err := convertDBRowToMessage(id, fromUserID, toUserID, content, isRead, readAtStr, createdAtStr)
 		if err != nil {
-			log.Printf("Failed to convert db row to message: %v", err)
+			logger.Warn("Failed to convert db row to message", zap.Error(err))
 			continue
 		}
 
@@ -624,7 +599,7 @@ func (h *MessageHandler) PullUnreadMessages(ctx context.Context, req *pb.PullUnr
 
 	// 检查遍历过程中是否有错误
 	if err = rows.Err(); err != nil {
-		log.Printf("Error occurred during rows iteration: %v", err)
+		logger.Error("Error occurred during rows iteration", zap.Error(err))
 		return nil, status.Errorf(codes.Internal, "Failed to process messages")
 	}
 
@@ -633,7 +608,10 @@ func (h *MessageHandler) PullUnreadMessages(ctx context.Context, req *pb.PullUnr
 	// 6. 判断是否还有更多未读消息
 	hasMore := totalUnread > int64(len(messages))
 
-	log.Printf("Successfully pulled %d unread messages for user %s (total: %d)", len(messages), userID, totalUnread)
+	logger.Info("Unread messages pulled",
+		zap.String("user_id", userID),
+		zap.Int("count", len(messages)),
+		zap.Int64("total", totalUnread))
 
 	// 7. 返回响应
 	return &pb.PullUnreadMessagesResponse{
@@ -653,7 +631,7 @@ func (h *MessageHandler) PullAllUnreadOnLogin(ctx context.Context, req *pb.PullA
 		return nil, err
 	}
 
-	log.Printf("User %s is pulling all unread messages on login", userID)
+	logger.Info("Pulling all unread messages on login", zap.String("user_id", userID))
 
 	// 1. 记录用户上线时间
 	h.streamOp.RecordUserOnlineTime(ctx, userID)
@@ -662,7 +640,7 @@ func (h *MessageHandler) PullAllUnreadOnLogin(ctx context.Context, req *pb.PullA
 	streamKey := fmt.Sprintf("stream:private:%s", userID)
 	messages, err := h.rdb.XRevRangeN(ctx, streamKey, "+", "-", 1000).Result()
 	if err != nil {
-		log.Printf("Warning: failed to read from stream: %v", err)
+		logger.Warn("Failed to read from stream", zap.Error(err))
 	}
 
 	// 3. 按消息类型分组
@@ -720,8 +698,11 @@ func (h *MessageHandler) PullAllUnreadOnLogin(ctx context.Context, req *pb.PullA
 		totalCount += detail.UnreadCount
 	}
 
-	log.Printf("User %s pulled %d private unread and %d group conversations with total %d unread messages",
-		userID, len(privateMessages), len(groupMessages), totalCount)
+	logger.Info("All unread messages pulled",
+		zap.String("user_id", userID),
+		zap.Int("private_count", len(privateMessages)),
+		zap.Int("group_count", len(groupMessages)),
+		zap.Int32("total_count", totalCount))
 
 	response := &pb.PullAllUnreadOnLoginResponse{
 		Code:               0,
@@ -776,7 +757,7 @@ func (h *MessageHandler) MarkPrivateMessageAsRead(ctx context.Context, req *pb.M
 	// 1. 在 Redis Stream 中更新已读状态
 	err = h.streamOp.UpdatePrivateMessageAsRead(ctx, userID, msgID)
 	if err != nil {
-		log.Printf("Warning: failed to update message read status in stream: %v", err)
+		logger.Warn("Failed to update message read status in stream", zap.Error(err))
 	}
 
 	// 2. 异步更新数据库
@@ -789,7 +770,9 @@ func (h *MessageHandler) MarkPrivateMessageAsRead(ctx context.Context, req *pb.M
 			msgID, userID)
 	}()
 
-	log.Printf("Private message %s marked as read by user %s", msgID, userID)
+	logger.Debug("Private message marked as read",
+		zap.String("msg_id", msgID),
+		zap.String("user_id", userID))
 
 	return &pb.MarkPrivateMessageAsReadResponse{
 		Code:    0,
@@ -810,7 +793,7 @@ func (h *MessageHandler) MarkGroupMessageAsRead(ctx context.Context, req *pb.Mar
 	// 1. 在 Redis Stream 中更新已读状态
 	err = h.streamOp.UpdateGroupMessageAsRead(ctx, groupID, lastReadMsgID)
 	if err != nil {
-		log.Printf("Warning: failed to update message read status in stream: %v", err)
+		logger.Warn("Failed to update message read status in stream", zap.Error(err))
 	}
 
 	// 2. 异步更新数据库
@@ -827,7 +810,9 @@ func (h *MessageHandler) MarkGroupMessageAsRead(ctx context.Context, req *pb.Mar
 		`, groupID, userID, lastReadMsgID)
 	}()
 
-	log.Printf("Group %s messages marked as read by user %s", groupID, userID)
+	logger.Debug("Group messages marked as read",
+		zap.String("group_id", groupID),
+		zap.String("user_id", userID))
 
 	return &pb.MarkGroupMessageAsReadResponse{
 		Code:    0,

@@ -1,0 +1,519 @@
+# ChatIM 系统集成测试脚本
+# 测试所有核心功能是否正常工作
+
+$ErrorActionPreference = "Continue"
+$baseUrl = "http://localhost:8081"
+$testResults = @()
+
+# 颜色输出函数
+function Write-Success { param($msg) Write-Host "✅ $msg" -ForegroundColor Green }
+function Write-Error { param($msg) Write-Host "❌ $msg" -ForegroundColor Red }
+function Write-Info { param($msg) Write-Host "ℹ️  $msg" -ForegroundColor Cyan }
+function Write-Section { param($msg) Write-Host "`n========== $msg ==========" -ForegroundColor Yellow }
+
+# 测试结果记录
+function Add-TestResult {
+    param($name, $success, $message = "")
+    $script:testResults += [PSCustomObject]@{
+        Test = $name
+        Success = $success
+        Message = $message
+        Time = Get-Date -Format "HH:mm:ss"
+    }
+}
+
+# HTTP 请求封装
+function Invoke-ApiRequest {
+    param(
+        [string]$Method = "GET",
+        [string]$Endpoint,
+        [object]$Body = $null,
+        [string]$Token = $null
+    )
+    
+    try {
+        $headers = @{
+            "Content-Type" = "application/json"
+        }
+        if ($Token) {
+            $headers["Authorization"] = "Bearer $Token"
+        }
+        
+        $params = @{
+            Uri = "$baseUrl$Endpoint"
+            Method = $Method
+            Headers = $headers
+            UseBasicParsing = $true
+        }
+        
+        if ($Body) {
+            $params["Body"] = ($Body | ConvertTo-Json -Depth 10)
+        }
+        
+        $response = Invoke-WebRequest @params
+        return @{
+            Success = $true
+            StatusCode = $response.StatusCode
+            Data = ($response.Content | ConvertFrom-Json)
+        }
+    } catch {
+        return @{
+            Success = $false
+            StatusCode = $_.Exception.Response.StatusCode.value__
+            Error = $_.Exception.Message
+        }
+    }
+}
+
+Write-Host @"
+╔══════════════════════════════════════════════════════╗
+║         ChatIM 系统集成测试                          ║
+║         System Integration Test                      ║
+╚══════════════════════════════════════════════════════╝
+"@ -ForegroundColor Cyan
+
+# ==================== 1. 健康检查 ====================
+Write-Section "1. 服务健康检查"
+
+Write-Info "检查 API Gateway..."
+try {
+    $response = Invoke-WebRequest -Uri "$baseUrl/api/v1/health" -UseBasicParsing -TimeoutSec 5
+    Write-Success "API Gateway 运行正常 (Status: $($response.StatusCode))"
+    Add-TestResult "API Gateway Health" $true
+} catch {
+    Write-Error "API Gateway 无法访问: $_"
+    Add-TestResult "API Gateway Health" $false "$_"
+}
+
+Write-Info "检查 Prometheus Metrics..."
+try {
+    $response = Invoke-WebRequest -Uri "http://localhost:9090/metrics" -UseBasicParsing -TimeoutSec 5
+    if ($response.Content -match "chatim_") {
+        Write-Success "Metrics 端点正常，指标数量: $(($response.Content | Select-String 'chatim_' -AllMatches).Matches.Count)"
+        Add-TestResult "Metrics Endpoint" $true
+    } else {
+        Write-Error "Metrics 端点无数据"
+        Add-TestResult "Metrics Endpoint" $false
+    }
+} catch {
+    Write-Error "Metrics 无法访问: $_"
+    Add-TestResult "Metrics Endpoint" $false "$_"
+}
+
+Write-Info "检查 pprof..."
+try {
+    $response = Invoke-WebRequest -Uri "http://localhost:6060/debug/pprof/" -UseBasicParsing -TimeoutSec 5
+    Write-Success "pprof 端点正常"
+    Add-TestResult "pprof Endpoint" $true
+} catch {
+    Write-Error "pprof 无法访问: $_"
+    Add-TestResult "pprof Endpoint" $false "$_"
+}
+
+# ==================== 2. 用户服务测试 ====================
+Write-Section "2. 用户服务测试"
+
+# 生成随机测试用户
+$timestamp = [DateTimeOffset]::Now.ToUnixTimeSeconds()
+$testUsername1 = "test_user_${timestamp}"
+$testUsername2 = "test_user2_${timestamp}"
+$testPassword = "Test@123456"
+$token1 = $null
+$token2 = $null
+$userId1 = $null
+$userId2 = $null
+
+# 2.1 注册用户1
+Write-Info "测试用户注册 (用户1)..."
+$result = Invoke-ApiRequest -Method POST -Endpoint "/api/v1/register" -Body @{
+    username = $testUsername1
+    password = $testPassword
+    email = "${testUsername1}@test.com"
+    phone = "13800138000"
+}
+
+if ($result.Success -and $result.Data.code -eq 200) {
+    Write-Success "用户1注册成功: $testUsername1"
+    Add-TestResult "User Registration (User1)" $true
+} else {
+    Write-Error "用户1注册失败: $($result.Error)"
+    Add-TestResult "User Registration (User1)" $false $result.Error
+}
+
+# 2.2 注册用户2
+Write-Info "测试用户注册 (用户2)..."
+$result = Invoke-ApiRequest -Method POST -Endpoint "/api/v1/register" -Body @{
+    username = $testUsername2
+    password = $testPassword
+    email = "${testUsername2}@test.com"
+    phone = "13800138001"
+}
+
+if ($result.Success -and $result.Data.code -eq 200) {
+    Write-Success "用户2注册成功: $testUsername2"
+    Add-TestResult "User Registration (User2)" $true
+} else {
+    Write-Error "用户2注册失败: $($result.Error)"
+    Add-TestResult "User Registration (User2)" $false $result.Error
+}
+
+# 2.3 用户1登录
+Write-Info "测试用户登录 (用户1)..."
+$result = Invoke-ApiRequest -Method POST -Endpoint "/api/v1/login" -Body @{
+    username = $testUsername1
+    password = $testPassword
+}
+
+if ($result.Success -and $result.Data.code -eq 200) {
+    $token1 = $result.Data.data.token
+    $userId1 = $result.Data.data.user_id
+    Write-Success "用户1登录成功，Token: $($token1.Substring(0, 20))..., UserID: $userId1"
+    Add-TestResult "User Login (User1)" $true
+} else {
+    Write-Error "用户1登录失败: $($result.Error)"
+    Add-TestResult "User Login (User1)" $false $result.Error
+}
+
+# 2.4 用户2登录
+Write-Info "测试用户登录 (用户2)..."
+$result = Invoke-ApiRequest -Method POST -Endpoint "/api/v1/login" -Body @{
+    username = $testUsername2
+    password = $testPassword
+}
+
+if ($result.Success -and $result.Data.code -eq 200) {
+    $token2 = $result.Data.data.token
+    $userId2 = $result.Data.data.user_id
+    Write-Success "用户2登录成功，Token: $($token2.Substring(0, 20))..., UserID: $userId2"
+    Add-TestResult "User Login (User2)" $true
+} else {
+    Write-Error "用户2登录失败: $($result.Error)"
+    Add-TestResult "User Login (User2)" $false $result.Error
+}
+
+# 2.5 获取用户信息
+if ($token1) {
+    Write-Info "测试获取用户信息..."
+    $result = Invoke-ApiRequest -Method GET -Endpoint "/api/v1/users/$userId1" -Token $token1
+    
+    if ($result.Success -and $result.Data.code -eq 200) {
+        Write-Success "获取用户信息成功: $($result.Data.data.username)"
+        Add-TestResult "Get User Info" $true
+    } else {
+        Write-Error "获取用户信息失败"
+        Add-TestResult "Get User Info" $false
+    }
+}
+
+# 2.6 搜索用户
+if ($token1) {
+    Write-Info "测试搜索用户..."
+    $result = Invoke-ApiRequest -Method GET -Endpoint "/api/v1/search/users?keyword=$testUsername2" -Token $token1
+    
+    if ($result.Success -and $result.Data.code -eq 200) {
+        $count = $result.Data.data.users.Count
+        Write-Success "搜索用户成功，找到 $count 个用户"
+        Add-TestResult "Search Users" $true
+    } else {
+        Write-Error "搜索用户失败"
+        Add-TestResult "Search Users" $false
+    }
+}
+
+# ==================== 3. 好友服务测试 ====================
+Write-Section "3. 好友服务测试"
+
+$friendRequestId = $null
+
+if ($token1 -and $token2 -and $userId1 -and $userId2) {
+    # 3.1 发送好友请求
+    Write-Info "测试发送好友请求..."
+    $result = Invoke-ApiRequest -Method POST -Endpoint "/api/v1/friends/requests" -Token $token1 -Body @{
+        to_user_id = $userId2
+        message = "你好，我是 $testUsername1"
+    }
+    
+    if ($result.Success -and $result.Data.code -eq 200) {
+        Write-Success "好友请求发送成功"
+        Add-TestResult "Send Friend Request" $true
+    } else {
+        Write-Error "好友请求发送失败"
+        Add-TestResult "Send Friend Request" $false
+    }
+    
+    Start-Sleep -Seconds 1
+    
+    # 3.2 获取好友请求列表
+    Write-Info "测试获取好友请求列表..."
+    $result = Invoke-ApiRequest -Method GET -Endpoint "/api/v1/friends/requests" -Token $token2
+    
+    if ($result.Success -and $result.Data.code -eq 200) {
+        $requests = $result.Data.data.requests
+        Write-Success "获取到 $($requests.Count) 个好友请求"
+        if ($requests.Count -gt 0) {
+            $friendRequestId = $requests[0].request_id
+            Write-Info "请求ID: $friendRequestId"
+        }
+        Add-TestResult "Get Friend Requests" $true
+    } else {
+        Write-Error "获取好友请求失败"
+        Add-TestResult "Get Friend Requests" $false
+    }
+    
+    # 3.3 接受好友请求
+    if ($friendRequestId) {
+        Write-Info "测试接受好友请求..."
+        $result = Invoke-ApiRequest -Method POST -Endpoint "/api/v1/friends/requests/handle" -Token $token2 -Body @{
+            request_id = $friendRequestId
+            action = 1  # 1=接受, 2=拒绝
+        }
+        
+        if ($result.Success -and $result.Data.code -eq 200) {
+            Write-Success "好友请求已接受，现在是好友关系"
+            Add-TestResult "Accept Friend Request" $true
+        } else {
+            Write-Error "接受好友请求失败"
+            Add-TestResult "Accept Friend Request" $false
+        }
+    }
+    
+    Start-Sleep -Seconds 1
+    
+    # 3.4 获取好友列表
+    Write-Info "测试获取好友列表..."
+    $result = Invoke-ApiRequest -Method GET -Endpoint "/api/v1/friends" -Token $token1
+    
+    if ($result.Success -and $result.Data.code -eq 200) {
+        $friends = $result.Data.data.friends
+        Write-Success "好友列表: $($friends.Count) 个好友"
+        Add-TestResult "Get Friends List" $true
+    } else {
+        Write-Error "获取好友列表失败"
+        Add-TestResult "Get Friends List" $false
+    }
+}
+
+# ==================== 4. 消息服务测试 ====================
+Write-Section "4. 消息服务测试"
+
+if ($token1 -and $token2 -and $userId1 -and $userId2) {
+    # 4.1 发送私聊消息
+    Write-Info "测试发送私聊消息..."
+    $testMessage = "你好！这是一条测试消息 - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+    $result = Invoke-ApiRequest -Method POST -Endpoint "/api/v1/messages/send" -Token $token1 -Body @{
+        to_user_id = $userId2
+        content_type = "text"
+        content = $testMessage
+    }
+    
+    if ($result.Success -and $result.Data.code -eq 200) {
+        $msgId = $result.Data.data.message_id
+        Write-Success "消息发送成功，消息ID: $msgId"
+        Add-TestResult "Send Private Message" $true
+    } else {
+        Write-Error "消息发送失败: $($result.Error)"
+        Add-TestResult "Send Private Message" $false $result.Error
+    }
+    
+    Start-Sleep -Seconds 1
+    
+    # 4.2 拉取未读消息
+    Write-Info "测试拉取未读消息..."
+    $result = Invoke-ApiRequest -Method GET -Endpoint "/api/v1/messages/pull" -Token $token2
+    
+    if ($result.Success -and $result.Data.code -eq 200) {
+        $messages = $result.Data.data.messages
+        Write-Success "拉取到 $($messages.Count) 条消息"
+        if ($messages.Count -gt 0) {
+            Write-Info "最新消息内容: $($messages[0].content)"
+        }
+        Add-TestResult "Pull Messages" $true
+    } else {
+        Write-Error "拉取消息失败"
+        Add-TestResult "Pull Messages" $false
+    }
+    
+    # 4.3 获取未读数量
+    Write-Info "测试获取未读消息数量..."
+    $result = Invoke-ApiRequest -Method GET -Endpoint "/api/v1/messages/unread/count" -Token $token2
+    
+    if ($result.Success -and $result.Data.code -eq 200) {
+        $count = $result.Data.data.unread_count
+        Write-Success "未读消息数量: $count"
+        Add-TestResult "Get Unread Count" $true
+    } else {
+        Write-Error "获取未读数量失败"
+        Add-TestResult "Get Unread Count" $false
+    }
+}
+
+# ==================== 5. 群组服务测试 ====================
+Write-Section "5. 群组服务测试"
+
+$groupId = $null
+
+if ($token1 -and $userId2) {
+    # 5.1 创建群组
+    Write-Info "测试创建群组..."
+    $groupName = "测试群组_$timestamp"
+    $result = Invoke-ApiRequest -Method POST -Endpoint "/api/v1/groups" -Token $token1 -Body @{
+        name = $groupName
+        description = "这是一个测试群组"
+        avatar = "https://example.com/avatar.jpg"
+        member_ids = @($userId2)
+    }
+    
+    if ($result.Success -and $result.Data.code -eq 200) {
+        $groupId = $result.Data.data.group_id
+        Write-Success "群组创建成功，群组ID: $groupId"
+        Add-TestResult "Create Group" $true
+    } else {
+        Write-Error "创建群组失败"
+        Add-TestResult "Create Group" $false
+    }
+    
+    Start-Sleep -Seconds 1
+    
+    # 5.2 获取群组信息
+    if ($groupId) {
+        Write-Info "测试获取群组信息..."
+        $result = Invoke-ApiRequest -Method GET -Endpoint "/api/v1/groups/$groupId" -Token $token1
+        
+        if ($result.Success -and $result.Data.code -eq 200) {
+            Write-Success "群组信息: $($result.Data.data.name)"
+            Add-TestResult "Get Group Info" $true
+        } else {
+            Write-Error "获取群组信息失败"
+            Add-TestResult "Get Group Info" $false
+        }
+        
+        # 5.3 发送群消息
+        Write-Info "测试发送群消息..."
+        $result = Invoke-ApiRequest -Method POST -Endpoint "/api/v1/groups/messages/send" -Token $token1 -Body @{
+            group_id = $groupId
+            content_type = "text"
+            content = "大家好！这是一条群消息测试"
+        }
+        
+        if ($result.Success -and $result.Data.code -eq 200) {
+            Write-Success "群消息发送成功"
+            Add-TestResult "Send Group Message" $true
+        } else {
+            Write-Error "群消息发送失败"
+            Add-TestResult "Send Group Message" $false
+        }
+        
+        # 5.4 获取群成员列表
+        Write-Info "测试获取群成员列表..."
+        $result = Invoke-ApiRequest -Method GET -Endpoint "/api/v1/groups/$groupId/members" -Token $token1
+        
+        if ($result.Success -and $result.Data.code -eq 200) {
+            $members = $result.Data.data.members
+            Write-Success "群成员数量: $($members.Count)"
+            Add-TestResult "Get Group Members" $true
+        } else {
+            Write-Error "获取群成员失败"
+            Add-TestResult "Get Group Members" $false
+        }
+    }
+}
+
+# ==================== 6. 会话服务测试 ====================
+Write-Section "6. 会话服务测试"
+
+if ($token1) {
+    Write-Info "测试获取会话列表..."
+    $result = Invoke-ApiRequest -Method GET -Endpoint "/api/v1/conversations" -Token $token1
+    
+    if ($result.Success -and $result.Data.code -eq 200) {
+        $conversations = $result.Data.data.conversations
+        Write-Success "会话列表: $($conversations.Count) 个会话"
+        Add-TestResult "Get Conversations" $true
+    } else {
+        Write-Error "获取会话列表失败"
+        Add-TestResult "Get Conversations" $false
+    }
+}
+
+# ==================== 7. 监控系统测试 ====================
+Write-Section "7. 监控系统测试"
+
+# 7.1 Prometheus
+Write-Info "测试 Prometheus..."
+try {
+    $response = Invoke-WebRequest -Uri "http://localhost:9091/api/v1/targets" -UseBasicParsing -TimeoutSec 5
+    $data = $response.Content | ConvertFrom-Json
+    $upTargets = ($data.data.activeTargets | Where-Object { $_.health -eq "up" }).Count
+    Write-Success "Prometheus 正常，UP 状态的目标: $upTargets"
+    Add-TestResult "Prometheus Targets" $true
+} catch {
+    Write-Error "Prometheus 访问失败: $_"
+    Add-TestResult "Prometheus Targets" $false "$_"
+}
+
+# 7.2 Grafana
+Write-Info "测试 Grafana..."
+try {
+    $response = Invoke-WebRequest -Uri "http://localhost:3000/api/health" -UseBasicParsing -TimeoutSec 5
+    Write-Success "Grafana 运行正常"
+    Add-TestResult "Grafana Health" $true
+} catch {
+    Write-Error "Grafana 访问失败: $_"
+    Add-TestResult "Grafana Health" $false "$_"
+}
+
+# 7.3 检查关键指标
+Write-Info "检查关键指标..."
+try {
+    $response = Invoke-WebRequest -Uri "http://localhost:9090/metrics" -UseBasicParsing
+    $metrics = $response.Content
+    
+    $checks = @(
+        @{ Name = "HTTP请求"; Pattern = "chatim_http_requests_total" }
+        @{ Name = "Goroutines"; Pattern = "chatim_go_goroutines" }
+        @{ Name = "内存使用"; Pattern = "chatim_go_memory" }
+    )
+    
+    foreach ($check in $checks) {
+        if ($metrics -match $check.Pattern) {
+            Write-Success "$($check.Name) 指标正常"
+        } else {
+            Write-Error "$($check.Name) 指标缺失"
+        }
+    }
+    Add-TestResult "Metrics Collection" $true
+} catch {
+    Write-Error "指标检查失败: $_"
+    Add-TestResult "Metrics Collection" $false "$_"
+}
+
+# ==================== 测试总结 ====================
+Write-Section "测试总结"
+
+$totalTests = $testResults.Count
+$passedTests = ($testResults | Where-Object { $_.Success -eq $true }).Count
+$failedTests = $totalTests - $passedTests
+$passRate = [math]::Round(($passedTests / $totalTests) * 100, 2)
+
+Write-Host ""
+Write-Host "总测试数: $totalTests" -ForegroundColor Cyan
+Write-Host "通过: $passedTests" -ForegroundColor Green
+Write-Host "失败: $failedTests" -ForegroundColor Red
+Write-Host "通过率: $passRate%" -ForegroundColor $(if ($passRate -ge 80) { "Green" } else { "Yellow" })
+
+Write-Host "`n详细结果:" -ForegroundColor Yellow
+$testResults | Format-Table -Property Test, Success, Time, Message -AutoSize
+
+# 保存结果到文件
+$reportPath = "test_report_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
+$testResults | ConvertTo-Json -Depth 10 | Out-File $reportPath
+Write-Info "测试报告已保存到: $reportPath"
+
+# 返回退出码
+if ($failedTests -eq 0) {
+    Write-Host "`n所有测试通过！系统运行正常！" -ForegroundColor Green
+    exit 0
+} else {
+    Write-Host "`n有 $failedTests 个测试失败，请检查系统状态" -ForegroundColor Yellow
+    exit 1
+}

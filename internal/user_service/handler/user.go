@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	pb "ChatIM/api/proto/user"
@@ -67,7 +68,17 @@ func (h *UserHandler) CreateUser(ctx context.Context, req *pb.CreateUserRequest)
 	}
 
 	// 2. 对密码进行哈希处理
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	// 根据环境变量调整bcrypt cost (测试环境使用较低的cost)
+	cost := bcrypt.DefaultCost // 生产环境: 10 (~46ms)
+	env := os.Getenv("ENV")
+	if env == "test" || env == "development" {
+		cost = 4 // 测试环境: 4 (~1ms, 46x faster)
+		log.Printf("Using bcrypt cost=%d for ENV=%s (fast mode)", cost, env)
+	} else {
+		log.Printf("Using bcrypt DefaultCost=%d for ENV=%s (secure mode)", cost, env)
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), cost)
 	if err != nil {
 		log.Printf("Failed to hash password: %v", err)
 		return nil, err
@@ -261,7 +272,7 @@ func (h *UserHandler) SearchUsers(ctx context.Context, req *pb.SearchUsersReques
 	// 搜索用户（用户名或昵称包含关键词）
 	keyword := "%" + req.Keyword + "%"
 	query := `
-		SELECT id, username, IFNULL(nickname, ''), IFNULL(avatar, '')
+		SELECT id, username, IFNULL(nickname, '')
 		FROM users
 		WHERE (username LIKE ? OR nickname LIKE ?)
 		ORDER BY 
@@ -291,7 +302,7 @@ func (h *UserHandler) SearchUsers(ctx context.Context, req *pb.SearchUsersReques
 	var users []*pb.UserSearchResult
 	for rows.Next() {
 		var user pb.UserSearchResult
-		err := rows.Scan(&user.Id, &user.Username, &user.Nickname, &user.Avatar)
+		err := rows.Scan(&user.Id, &user.Username, &user.Nickname)
 		if err != nil {
 			log.Printf("Failed to scan user row: %v", err)
 			continue

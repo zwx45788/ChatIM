@@ -51,3 +51,11 @@ config.local.yaml
 # 临时文件 / Temporary files
 *.tmp
 *.temp
+# 测试文件
+*.ps1
+
+# vue包
+chatim-client/node_modules/
+
+# 文档
+*.md

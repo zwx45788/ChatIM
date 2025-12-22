@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
+	"ChatIM/pkg/logger"
+
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 )
 
 // StreamOperator 处理 Stream 相关的操作
@@ -60,11 +62,11 @@ func (so *StreamOperator) AddPrivateMessage(ctx context.Context, msgID, fromUser
 	}).Result()
 
 	if err != nil {
-		log.Printf("Error adding private message to stream: %v", err)
+		logger.Error("Error adding private message to stream", zap.Error(err), zap.String("msg_id", msgID))
 		return "", err
 	}
 
-	log.Printf("Private message %s added to stream with ID %s", msgID, msgStreamID)
+	logger.Debug("Private message added to stream", zap.String("msg_id", msgID), zap.String("stream_id", msgStreamID))
 	return msgStreamID, nil
 }
 
@@ -101,14 +103,14 @@ func (so *StreamOperator) AddGroupMessageToMembers(ctx context.Context, msgID, g
 		}).Result()
 
 		if err != nil {
-			log.Printf("Warning: failed to add group message to member %s stream: %v", memberID, err)
+			logger.Warn("Failed to add group message to member stream", zap.String("member_id", memberID), zap.Error(err))
 			continue
 		}
 
 		successCount++
 	}
 
-	log.Printf("Group message %s added to %d/%d members' streams", msgID, successCount, len(memberIDs)-1)
+	logger.Debug("Group message added to members' streams", zap.String("msg_id", msgID), zap.Int("success_count", successCount), zap.Int("total_members", len(memberIDs)-1))
 
 	if successCount == 0 {
 		return fmt.Errorf("failed to add message to any member stream")
@@ -141,11 +143,11 @@ func (so *StreamOperator) AddGroupMessage(ctx context.Context, msgID, groupID, f
 	}).Result()
 
 	if err != nil {
-		log.Printf("Error adding group message to stream: %v", err)
+		logger.Error("Error adding group message to stream", zap.Error(err), zap.String("msg_id", msgID))
 		return "", err
 	}
 
-	log.Printf("Group message %s added to stream with ID %s", msgID, msgStreamID)
+	logger.Debug("Group message added to stream", zap.String("msg_id", msgID), zap.String("stream_id", msgStreamID))
 	return msgStreamID, nil
 }
 
@@ -157,7 +159,7 @@ func (so *StreamOperator) ReadMessages(ctx context.Context, streamKey string, st
 
 	result, err := so.rdb.XRange(ctx, streamKey, startID, "+").Result()
 	if err != nil {
-		log.Printf("Error reading messages from stream: %v", err)
+		logger.Error("Error reading messages from stream", zap.Error(err), zap.String("stream_key", streamKey))
 		return nil, err
 	}
 
@@ -210,7 +212,7 @@ func (so *StreamOperator) ReadMessagesWithGroup(ctx context.Context, streamKey, 
 			// 超时，没有新消息
 			return []map[string]string{}, nil
 		}
-		log.Printf("Error reading from consumer group: %v", err)
+		logger.Error("Error reading from consumer group", zap.Error(err), zap.String("stream_key", streamKey))
 		return nil, err
 	}
 
@@ -239,7 +241,7 @@ func (so *StreamOperator) TrimStream(ctx context.Context, streamKey string, maxL
 	// 使用 XTRIM MAXLEN 保留最近的消息
 	err := so.rdb.XTrimMaxLen(ctx, streamKey, maxLen).Err()
 	if err != nil {
-		log.Printf("Error trimming stream: %v", err)
+		logger.Error("Error trimming stream", zap.Error(err), zap.String("stream_key", streamKey))
 		return err
 	}
 
@@ -251,7 +253,7 @@ func (so *StreamOperator) TrimStreamByMinID(ctx context.Context, streamKey strin
 	// 删除所有小于 minID 的消息
 	err := so.rdb.XTrimMinID(ctx, streamKey, minID).Err()
 	if err != nil {
-		log.Printf("Error trimming stream by minID: %v", err)
+		logger.Error("Error trimming stream by minID", zap.Error(err), zap.String("stream_key", streamKey))
 		return err
 	}
 
@@ -262,7 +264,7 @@ func (so *StreamOperator) TrimStreamByMinID(ctx context.Context, streamKey strin
 func (so *StreamOperator) GetStreamLength(ctx context.Context, streamKey string) (int64, error) {
 	length, err := so.rdb.XLen(ctx, streamKey).Result()
 	if err != nil {
-		log.Printf("Error getting stream length: %v", err)
+		logger.Error("Error getting stream length", zap.Error(err), zap.String("stream_key", streamKey))
 		return 0, err
 	}
 
@@ -273,7 +275,7 @@ func (so *StreamOperator) GetStreamLength(ctx context.Context, streamKey string)
 func (so *StreamOperator) GetStreamInfo(ctx context.Context, streamKey string) (*redis.XInfoStream, error) {
 	info, err := so.rdb.XInfoStream(ctx, streamKey).Result()
 	if err != nil {
-		log.Printf("Error getting stream info: %v", err)
+		logger.Error("Error getting stream info", zap.Error(err), zap.String("stream_key", streamKey))
 		return nil, err
 	}
 
@@ -287,7 +289,7 @@ func (so *StreamOperator) SaveReadState(ctx context.Context, groupID, userID, la
 	// 设置 24 小时过期
 	err := so.rdb.Set(ctx, readKey, lastReadMsgID, 24*time.Hour).Err()
 	if err != nil {
-		log.Printf("Error saving read state: %v", err)
+		logger.Error("Error saving read state", zap.Error(err), zap.String("group_id", groupID), zap.String("user_id", userID))
 		return err
 	}
 
@@ -295,7 +297,7 @@ func (so *StreamOperator) SaveReadState(ctx context.Context, groupID, userID, la
 	timestampKey := fmt.Sprintf("read:group:%s:user:%s:time", groupID, userID)
 	err = so.rdb.Set(ctx, timestampKey, time.Now().Unix(), 24*time.Hour).Err()
 	if err != nil {
-		log.Printf("Error saving read timestamp: %v", err)
+		logger.Error("Error saving read timestamp", zap.Error(err), zap.String("group_id", groupID), zap.String("user_id", userID))
 		return err
 	}
 
@@ -311,7 +313,7 @@ func (so *StreamOperator) GetReadState(ctx context.Context, groupID, userID stri
 		if err == redis.Nil {
 			return "", nil // 未读状态
 		}
-		log.Printf("Error getting read state: %v", err)
+		logger.Error("Error getting read state", zap.Error(err), zap.String("group_id", groupID), zap.String("user_id", userID))
 		return "", err
 	}
 
@@ -325,7 +327,7 @@ func (so *StreamOperator) RecordUserOnlineTime(ctx context.Context, userID strin
 	// 记录当前时间（不设置过期，除非需要清理）
 	err := so.rdb.Set(ctx, onlineKey, time.Now().Unix(), 0).Err()
 	if err != nil {
-		log.Printf("Error recording user online time: %v", err)
+		logger.Error("Error recording user online time", zap.Error(err), zap.String("user_id", userID))
 		return err
 	}
 
@@ -342,7 +344,7 @@ func (so *StreamOperator) GetUserLastOnlineTime(ctx context.Context, userID stri
 			// 首次登录，返回 7 天前
 			return time.Now().AddDate(0, 0, -7).Unix(), nil
 		}
-		log.Printf("Error getting user last online time: %v", err)
+		logger.Error("Error getting user last online time", zap.Error(err), zap.String("user_id", userID))
 		return 0, err
 	}
 
@@ -363,7 +365,7 @@ func (so *StreamOperator) CacheUserGroups(ctx context.Context, userID string, gr
 	// 使用 Set 结构存储，便于后续操作
 	if len(groups) == 0 {
 		if err := so.rdb.SAdd(ctx, cacheKey, emptyGroupSentinel).Err(); err != nil {
-			log.Printf("Error caching empty user group set: %v", err)
+			logger.Error("Error caching empty user group set", zap.Error(err), zap.String("user_id", userID))
 			return err
 		}
 		so.rdb.Expire(ctx, cacheKey, 1*time.Minute)
@@ -372,7 +374,7 @@ func (so *StreamOperator) CacheUserGroups(ctx context.Context, userID string, gr
 
 	for _, groupID := range groups {
 		if err := so.rdb.SAdd(ctx, cacheKey, groupID).Err(); err != nil {
-			log.Printf("Error caching user group: %v", err)
+			logger.Error("Error caching user group", zap.Error(err), zap.String("user_id", userID), zap.String("group_id", groupID))
 			return err
 		}
 	}
@@ -392,7 +394,7 @@ func (so *StreamOperator) GetCachedUserGroups(ctx context.Context, userID string
 		if err == redis.Nil {
 			return []string{}, false, nil
 		}
-		log.Printf("Error getting cached user groups: %v", err)
+		logger.Error("Error getting cached user groups", zap.Error(err), zap.String("user_id", userID))
 		return nil, false, err
 	}
 
@@ -413,7 +415,7 @@ func (so *StreamOperator) InvalidateUserGroupCache(ctx context.Context, userID s
 
 	err := so.rdb.Del(ctx, cacheKey).Err()
 	if err != nil {
-		log.Printf("Error invalidating user group cache: %v", err)
+		logger.Error("Error invalidating user group cache", zap.Error(err), zap.String("user_id", userID))
 		return err
 	}
 
@@ -427,7 +429,7 @@ func (so *StreamOperator) CacheGroupMembers(ctx context.Context, groupID string,
 	// 使用 Set 结构存储
 	if len(members) == 0 {
 		if err := so.rdb.SAdd(ctx, cacheKey, emptyGroupSentinel).Err(); err != nil {
-			log.Printf("Error caching empty group member set: %v", err)
+			logger.Error("Error caching empty group member set", zap.Error(err), zap.String("group_id", groupID))
 			return err
 		}
 		so.rdb.Expire(ctx, cacheKey, 1*time.Minute)
@@ -441,7 +443,7 @@ func (so *StreamOperator) CacheGroupMembers(ctx context.Context, groupID string,
 	}
 
 	if err := so.rdb.SAdd(ctx, cacheKey, membersInterface...).Err(); err != nil {
-		log.Printf("Error caching group members: %v", err)
+		logger.Error("Error caching group members", zap.Error(err), zap.String("group_id", groupID))
 		return err
 	}
 
@@ -460,7 +462,7 @@ func (so *StreamOperator) GetCachedGroupMembers(ctx context.Context, groupID str
 		if err == redis.Nil {
 			return []string{}, false, nil
 		}
-		log.Printf("Error getting cached group members: %v", err)
+		logger.Error("Error getting cached group members", zap.Error(err), zap.String("group_id", groupID))
 		return nil, false, err
 	}
 
@@ -486,7 +488,7 @@ func (so *StreamOperator) InvalidateGroupMemberCache(ctx context.Context, groupI
 
 	err := so.rdb.Del(ctx, cacheKey).Err()
 	if err != nil {
-		log.Printf("Error invalidating group member cache: %v", err)
+		logger.Error("Error invalidating group member cache", zap.Error(err), zap.String("group_id", groupID))
 		return err
 	}
 
@@ -500,7 +502,7 @@ func (so *StreamOperator) UpdatePrivateMessageAsRead(ctx context.Context, toUser
 	// 读取流中所有消息
 	messages, err := so.rdb.XRange(ctx, streamKey, "-", "+").Result()
 	if err != nil {
-		log.Printf("Error reading stream: %v", err)
+		logger.Error("Error reading stream", zap.Error(err), zap.String("stream_key", streamKey))
 		return err
 	}
 
@@ -516,7 +518,7 @@ func (so *StreamOperator) UpdatePrivateMessageAsRead(ctx context.Context, toUser
 				"is_read": "true",
 				"read_at": now,
 			}).Err()
-			log.Printf("Marked message %s as read", messageID)
+			logger.Debug("Marked message as read", zap.String("message_id", messageID))
 			return nil
 		}
 	}
@@ -536,11 +538,11 @@ func (so *StreamOperator) UpdateGroupMessageAsRead(ctx context.Context, groupID,
 	}).Err()
 
 	if err != nil {
-		log.Printf("Error marking message %s as read: %v", messageID, err)
+		logger.Error("Error marking message as read", zap.String("message_id", messageID), zap.Error(err))
 		return err
 	}
 
-	log.Printf("Marked group message %s as read", messageID)
+	logger.Debug("Marked group message as read", zap.String("message_id", messageID))
 	return nil
 }
 
@@ -553,7 +555,7 @@ func (so *StreamOperator) GetMessageReadStatus(ctx context.Context, messageID st
 		if err == redis.Nil {
 			return false, nil // 消息未读
 		}
-		log.Printf("Error getting message read status: %v", err)
+		logger.Error("Error getting message read status", zap.Error(err), zap.String("message_id", messageID))
 		return false, err
 	}
 
@@ -580,7 +582,7 @@ func (so *StreamOperator) UpdateConversationTime(ctx context.Context, userID, co
 	}).Err()
 
 	if err != nil {
-		log.Printf("Error updating conversation time: %v", err)
+		logger.Error("Error updating conversation time", zap.Error(err), zap.String("user_id", userID), zap.String("conversation_id", conversationID))
 		return err
 	}
 
@@ -603,7 +605,7 @@ func (so *StreamOperator) PinConversation(ctx context.Context, userID, conversat
 
 	// 如果已经置顶，不做处理
 	if currentScore > 10000000000000 {
-		log.Printf("Conversation %s already pinned", conversationID)
+		logger.Debug("Conversation already pinned", zap.String("conversation_id", conversationID))
 		return nil
 	}
 
@@ -616,11 +618,11 @@ func (so *StreamOperator) PinConversation(ctx context.Context, userID, conversat
 	}).Err()
 
 	if err != nil {
-		log.Printf("Error pinning conversation: %v", err)
+		logger.Error("Error pinning conversation", zap.Error(err), zap.String("user_id", userID), zap.String("conversation_id", conversationID))
 		return err
 	}
 
-	log.Printf("✅ Pinned conversation %s for user %s", conversationID, userID)
+	logger.Info("Pinned conversation", zap.String("conversation_id", conversationID), zap.String("user_id", userID))
 	return nil
 }
 
@@ -636,7 +638,7 @@ func (so *StreamOperator) UnpinConversation(ctx context.Context, userID, convers
 
 	// 如果未置顶，不做处理
 	if currentScore < 10000000000000 {
-		log.Printf("Conversation %s is not pinned", conversationID)
+		logger.Debug("Conversation is not pinned", zap.String("conversation_id", conversationID))
 		return nil
 	}
 
@@ -649,11 +651,11 @@ func (so *StreamOperator) UnpinConversation(ctx context.Context, userID, convers
 	}).Err()
 
 	if err != nil {
-		log.Printf("Error unpinning conversation: %v", err)
+		logger.Error("Error unpinning conversation", zap.Error(err), zap.String("user_id", userID), zap.String("conversation_id", conversationID))
 		return err
 	}
 
-	log.Printf("✅ Unpinned conversation %s for user %s", conversationID, userID)
+	logger.Info("Unpinned conversation", zap.String("conversation_id", conversationID), zap.String("user_id", userID))
 	return nil
 }
 
@@ -664,7 +666,7 @@ func (so *StreamOperator) GetConversationList(ctx context.Context, userID string
 	// ZREVRANGE：按 score 降序（置顶和最新的在前）
 	results, err := so.rdb.ZRevRangeWithScores(ctx, key, offset, offset+limit-1).Result()
 	if err != nil {
-		log.Printf("Error getting conversation list: %v", err)
+		logger.Error("Error getting conversation list", zap.Error(err), zap.String("user_id", userID))
 		return nil, err
 	}
 
@@ -702,10 +704,25 @@ func (so *StreamOperator) DeleteConversation(ctx context.Context, userID, conver
 
 	err := so.rdb.ZRem(ctx, key, conversationID).Err()
 	if err != nil {
-		log.Printf("Error deleting conversation: %v", err)
+		logger.Error("Error deleting conversation", zap.Error(err), zap.String("user_id", userID), zap.String("conversation_id", conversationID))
 		return err
 	}
 
-	log.Printf("✅ Deleted conversation %s for user %s", conversationID, userID)
+	logger.Info("Deleted conversation", zap.String("conversation_id", conversationID), zap.String("user_id", userID))
+	return nil
+}
+func (so *StreamOperator) CreateConversation(ctx context.Context, userID, conversationID string) error {
+	key := fmt.Sprintf("conversation:list:%s", userID)
+
+	err := so.rdb.ZAdd(ctx, key, redis.Z{
+		Score:  float64(time.Now().UnixMilli()),
+		Member: conversationID,
+	}).Err()
+	if err != nil {
+		logger.Error("Error creating conversation", zap.Error(err), zap.String("user_id", userID), zap.String("conversation_id", conversationID))
+		return err
+	}
+
+	logger.Info("Created conversation", zap.String("conversation_id", conversationID), zap.String("user_id", userID))
 	return nil
 }

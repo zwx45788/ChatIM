@@ -22,3 +22,9 @@ database:
 
 jwt:
   secret: "your-super-secret-key-change-this-in-production"
+
+oss:
+  access_key_id: "YOUR_ACCESS_KEY_ID"
+  access_key_secret: "YOUR_ACCESS_KEY_SECRET"
+  endpoint: "oss-cn-your-region.aliyuncs.com"
+  bucket_name: "your-chatim-bucket-name"

@@ -1,4 +1,4 @@
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useMainStore } from '../store.js';
 import { api } from '../api.js?v=5';
 
@@ -31,10 +31,10 @@ export default {
                 if (g.name.includes(searchKeyword.value)) {
                     list.push({
                         type: 'group',
-                        id: g.id,
+                        id: g.group_id,
                         name: g.name,
                         avatar: 'G',
-                        unread: store.unreadCounts[`group_${g.id}`] || 0
+                        unread: store.unreadCounts[`group_${g.group_id}`] || 0
                     });
                 }
             });
@@ -42,11 +42,11 @@ export default {
         });
 
         const scrollToBottom = () => {
-            nextTick(() => {
+            setTimeout(() => {
                 if (messagesContainer.value) {
                     messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
                 }
-            });
+            }, 0);
         };
 
         watch(messages, () => {

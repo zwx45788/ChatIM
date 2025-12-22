@@ -1,14 +1,15 @@
 package middleware
 
 import (
-	"log"
 	"net/http"
 	"strings"
 
 	"ChatIM/pkg/auth"
+	"ChatIM/pkg/logger"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"go.uber.org/zap"
 )
 
 // AuthMiddleware JWT 认证中间件
@@ -50,10 +51,10 @@ func AuthMiddleware() gin.HandlerFunc {
 
 		// 4. 解析 Token
 		claims, err := auth.ParseToken(tokenString)
-		log.Printf("Attempting to parse token: %s", tokenString)
+		logger.Debug("Attempting to parse token", zap.String("token", tokenString))
 		if err != nil {
 			// 同样，根据请求类型返回错误
-			log.Printf("Token parsing failed: %v", err)
+			logger.Warn("Token parsing failed", zap.Error(err))
 			if websocket.IsWebSocketUpgrade(c.Request) {
 				c.AbortWithStatus(http.StatusUnauthorized)
 			} else {

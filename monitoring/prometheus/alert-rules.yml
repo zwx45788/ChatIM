@@ -1,0 +1,218 @@
+groups:
+  # HTTP 服务告警
+  - name: http_alerts
+    interval: 30s
+    rules:
+      # 高错误率告警
+      - alert: HighHTTPErrorRate
+        expr: |
+          sum(rate(chatim_http_requests_total{status=~"5.."}[5m])) by (job)
+          /
+          sum(rate(chatim_http_requests_total[5m])) by (job)
+          > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          service: '{{ $labels.job }}'
+        annotations:
+          summary: "高 HTTP 错误率 (实例 {{ $labels.job }})"
+          description: "{{ $labels.job }} HTTP 错误率超过 5% (当前值: {{ $value | humanizePercentage }})"
+
+      # 高延迟告警
+      - alert: HighHTTPLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(chatim_http_request_duration_seconds_bucket[5m])) by (job, le)
+          ) > 1
+        for: 10m
+        labels:
+          severity: warning
+          service: '{{ $labels.job }}'
+        annotations:
+          summary: "高 HTTP 延迟 (实例 {{ $labels.job }})"
+          description: "{{ $labels.job }} P95 延迟超过 1s (当前值: {{ $value }}s)"
+
+      # 请求量突降告警
+      - alert: HTTPRequestDropped
+        expr: |
+          sum(rate(chatim_http_requests_total[5m])) by (job)
+          < 
+          sum(rate(chatim_http_requests_total[5m] offset 1h)) by (job) * 0.5
+        for: 10m
+        labels:
+          severity: warning
+          service: '{{ $labels.job }}'
+        annotations:
+          summary: "HTTP 请求量突降 (实例 {{ $labels.job }})"
+          description: "{{ $labels.job }} 请求量相比 1 小时前下降超过 50%"
+
+  # 消息服务告警
+  - name: message_alerts
+    interval: 30s
+    rules:
+      # 消息发送失败率过高
+      - alert: HighMessageSendFailureRate
+        expr: |
+          sum(rate(chatim_messages_sent_total{status="failed"}[5m])) by (type)
+          /
+          sum(rate(chatim_messages_sent_total[5m])) by (type)
+          > 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "消息发送失败率过高 (类型: {{ $labels.type }})"
+          description: "{{ $labels.type }} 消息发送失败率超过 10% (当前值: {{ $value | humanizePercentage }})"
+
+      # Redis Stream 积压过多
+      - alert: RedisStreamBacklog
+        expr: chatim_redis_stream_pending_messages > 1000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis Stream 消息积压 (Stream: {{ $labels.stream_key }})"
+          description: "{{ $labels.stream_key }} 积压消息超过 1000 条 (当前值: {{ $value }})"
+
+  # WebSocket 告警
+  - name: websocket_alerts
+    interval: 30s
+    rules:
+      # WebSocket 连接数突降
+      - alert: WebSocketConnectionDropped
+        expr: |
+          chatim_websocket_active_connections
+          < 
+          chatim_websocket_active_connections offset 10m * 0.7
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "WebSocket 连接数突降"
+          description: "WebSocket 连接数相比 10 分钟前下降超过 30% (当前值: {{ $value }})"
+
+  # 资源使用告警
+  - name: resource_alerts
+    interval: 30s
+    rules:
+      # 内存使用过高
+      - alert: HighMemoryUsage
+        expr: chatim_go_memory_heap_bytes > 1073741824  # 1GB
+        for: 10m
+        labels:
+          severity: warning
+          service: '{{ $labels.job }}'
+        annotations:
+          summary: "内存使用过高 (实例 {{ $labels.job }})"
+          description: "{{ $labels.job }} 堆内存使用超过 1GB (当前值: {{ $value | humanize }}B)"
+
+      # Goroutine 数量过多
+      - alert: HighGoroutineCount
+        expr: chatim_go_goroutines > 10000
+        for: 10m
+        labels:
+          severity: warning
+          service: '{{ $labels.job }}'
+        annotations:
+          summary: "Goroutine 数量过多 (实例 {{ $labels.job }})"
+          description: "{{ $labels.job }} Goroutine 数量超过 10000 (当前值: {{ $value }})"
+
+      # GC 暂停时间过长
+      - alert: HighGCPause
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(chatim_go_gc_pause_duration_seconds_bucket[5m])) by (job, le)
+          ) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          service: '{{ $labels.job }}'
+        annotations:
+          summary: "GC 暂停时间过长 (实例 {{ $labels.job }})"
+          description: "{{ $labels.job }} P95 GC 暂停时间超过 100ms (当前值: {{ $value }}s)"
+
+  # Redis 告警
+  - name: redis_alerts
+    interval: 30s
+    rules:
+      # Redis 操作失败率过高
+      - alert: HighRedisFailureRate
+        expr: |
+          sum(rate(chatim_redis_operations_total{status="failed"}[5m])) by (operation)
+          /
+          sum(rate(chatim_redis_operations_total[5m])) by (operation)
+          > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis 操作失败率过高 (操作: {{ $labels.operation }})"
+          description: "{{ $labels.operation }} 失败率超过 5% (当前值: {{ $value | humanizePercentage }})"
+
+      # Redis 操作延迟过高
+      - alert: HighRedisLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(chatim_redis_operation_duration_seconds_bucket[5m])) by (operation, le)
+          ) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis 操作延迟过高 (操作: {{ $labels.operation }})"
+          description: "{{ $labels.operation }} P95 延迟超过 50ms (当前值: {{ $value }}s)"
+
+  # 数据库告警
+  - name: database_alerts
+    interval: 30s
+    rules:
+      # 数据库查询失败率过高
+      - alert: HighDBFailureRate
+        expr: |
+          sum(rate(chatim_db_queries_total{status="failed"}[5m])) by (operation, table)
+          /
+          sum(rate(chatim_db_queries_total[5m])) by (operation, table)
+          > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "数据库查询失败率过高 ({{ $labels.operation }} on {{ $labels.table }})"
+          description: "{{ $labels.operation }} on {{ $labels.table }} 失败率超过 5% (当前值: {{ $value | humanizePercentage }})"
+
+      # 数据库查询延迟过高
+      - alert: HighDBLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(chatim_db_query_duration_seconds_bucket[5m])) by (operation, table, le)
+          ) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "数据库查询延迟过高 ({{ $labels.operation }} on {{ $labels.table }})"
+          description: "{{ $labels.operation }} on {{ $labels.table }} P95 延迟超过 1s (当前值: {{ $value }}s)"
+
+  # 服务健康告警
+  - name: service_health
+    interval: 30s
+    rules:
+      # 服务不可用
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "服务不可用 (实例 {{ $labels.job }})"
+          description: "{{ $labels.job }} 已经停止响应超过 1 分钟"
+
+      # 服务重启频繁
+      - alert: FrequentRestarts
+        expr: changes(process_start_time_seconds[1h]) > 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "服务重启频繁 (实例 {{ $labels.job }})"
+          description: "{{ $labels.job }} 在过去 1 小时内重启超过 3 次"

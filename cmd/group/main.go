@@ -3,9 +3,10 @@ package main
 import (
 	"ChatIM/pkg/config"
 	"ChatIM/pkg/database"
-	"log"
+	"ChatIM/pkg/logger"
 	"net"
 
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 
@@ -17,11 +18,24 @@ func main() {
 	// 1. 初始化数据源
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		panic("Failed to load config: " + err.Error())
 	}
+
+	// 初始化 logger
+	if err := logger.InitLogger(logger.Config{
+		Level:      cfg.Log.Level,
+		OutputPath: cfg.Log.OutputPath,
+		DevMode:    cfg.Log.DevMode,
+	}); err != nil {
+		panic("Failed to initialize logger: " + err.Error())
+	}
+	defer logger.Sync()
+
+	logger.Info("=== Group Service starting ===")
+
 	db, err := database.InitDB(cfg.Database.MySQL.DSN)
 	if err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
+		logger.Fatal("Failed to initialize database", zap.Error(err))
 	}
 	defer db.Close()
 
@@ -30,17 +44,19 @@ func main() {
 
 	lis, err := net.Listen("tcp", cfg.Server.GroupGRPCPort)
 	if err != nil {
-		log.Fatalf("Failed to listen on gRPC port %v: %v", cfg.Server.GroupGRPCPort, err)
+		logger.Fatal("Failed to listen on gRPC port",
+			zap.String("port", cfg.Server.GroupGRPCPort),
+			zap.Error(err))
 	}
-	log.Printf("gRPC server is running on %v...", cfg.Server.GroupGRPCPort)
 
 	// 3. 注册GroupService
 	pb.RegisterGroupServiceServer(grpcSrv, handler.NewGroupHandler(db))
 	reflection.Register(grpcSrv)
 
-	log.Printf("Group service is running on %v...", cfg.Server.GroupGRPCPort)
+	logger.Info("🚀 Group Service gRPC server started",
+		zap.String("port", cfg.Server.GroupGRPCPort))
 
 	if err := grpcSrv.Serve(lis); err != nil {
-		log.Fatalf("failed to serve gRPC: %v", err)
+		logger.Fatal("Failed to serve gRPC", zap.Error(err))
 	}
 }

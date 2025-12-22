@@ -2,7 +2,6 @@ package pkg
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -10,7 +9,10 @@ import (
 	"syscall"
 	"time"
 
+	"ChatIM/pkg/logger"
+
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 func Run(r *gin.Engine, srvName string, addr string, stop func()) {
@@ -21,9 +23,9 @@ func Run(r *gin.Engine, srvName string, addr string, stop func()) {
 	}
 
 	go func() {
-		log.Printf("%s running in %s\n", srvName, srv.Addr)
+		logger.Info("Server starting", zap.String("name", srvName), zap.String("addr", srv.Addr))
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("listen: %s\n", err)
+			logger.Fatal("Server listen failed", zap.Error(err))
 		}
 	}()
 
@@ -33,19 +35,19 @@ func Run(r *gin.Engine, srvName string, addr string, stop func()) {
 
 	<-quit
 
-	log.Printf("Shutting down project %s...\n", srvName)
+	logger.Info("Shutting down server", zap.String("name", srvName))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if stop != nil {
 		stop()
 	}
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatalf("%s forced to shutdown: %v", srvName, err)
+		logger.Fatal("Server forced to shutdown", zap.String("name", srvName), zap.Error(err))
 	}
 	select {
 	case <-ctx.Done():
-		log.Print("wait time out...")
+		logger.Warn("Shutdown timeout")
 	}
-	log.Printf("%s stop success...\n", srvName)
+	logger.Info("Server stopped successfully", zap.String("name", srvName))
 
 }

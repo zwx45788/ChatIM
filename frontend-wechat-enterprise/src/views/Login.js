@@ -1,17 +1,17 @@
 import { ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { router } from '../router.js';
 import { useMainStore } from '../store.js';
 import { api } from '../api.js?v=5';
 
 export default {
     setup() {
-        const router = useRouter();
+        
         const store = useMainStore();
         
         const isLogin = ref(true);
         const username = ref('');
         const password = ref('');
-        const email = ref('');
+        const nickname = ref('');
         const errorMsg = ref('');
         const loading = ref(false);
 
@@ -29,21 +29,20 @@ export default {
                     // 登录接口返回 token，但不包含用户信息，需要单独获取
                     const token = res.token;
                     
-                    const userRes = await api.getCurrentUser(token);
-                    const userData = userRes.data;
+                    const userData = await api.getCurrentUser(token);
                     
                     // 构造符合前端要求的用户对象
                     const user = {
                         id: userData.user_id,
                         username: userData.username,
                         nickname: userData.nickname,
-                        avatar: userData.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${userData.username}`
+                        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${userData.username}`
                     };
 
                     store.setUser(user, token);
                     router.push('/');
                 } else {
-                    await api.register(username.value, password.value, email.value);
+                    await api.register(username.value, password.value, nickname.value);
                     alert('注册成功，请登录');
                     isLogin.value = true;
                 }
@@ -58,7 +57,7 @@ export default {
             isLogin,
             username,
             password,
-            email,
+            nickname,
             errorMsg,
             loading,
             toggleMode,
@@ -88,8 +87,8 @@ export default {
                 </div>
 
                 <div v-if="!isLogin">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">邮箱</label>
-                    <input v-model="email" type="email" required class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all" placeholder="example@company.com">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">昵称</label>
+                    <input v-model="nickname" type="text" required class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all" placeholder="请输入昵称">
                 </div>
 
                 <div v-if="errorMsg" class="text-red-500 text-sm text-center bg-red-50 p-2 rounded">

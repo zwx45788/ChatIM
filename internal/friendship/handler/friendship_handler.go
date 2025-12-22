@@ -36,11 +36,25 @@ func (h *FriendshipHandler) SendFriendRequest(ctx context.Context, req *pb.SendF
 		return nil, status.Errorf(codes.Unauthenticated, "未认证用户")
 	}
 
+	if req.GetToUserId() == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "to_user_id 不能为空")
+	}
+
 	log.Printf("User %s sending friend request to %s", fromUserID, req.ToUserId)
 
 	// 验证不能加自己
 	if req.ToUserId == fromUserID {
 		return nil, status.Errorf(codes.InvalidArgument, "不能添加自己为好友")
+	}
+
+	// 检查目标用户是否存在（否则会触发外键错误，最终变成 Internal）
+	targetExists, err := h.repo.UserExists(ctx, req.ToUserId)
+	if err != nil {
+		log.Printf("Error checking target user exists: %v", err)
+		return nil, status.Errorf(codes.Internal, "检查用户失败")
+	}
+	if !targetExists {
+		return nil, status.Errorf(codes.NotFound, "用户不存在")
 	}
 
 	// 检查是否已是好友

@@ -1,8 +1,10 @@
 # 构建阶段
-FROM golang:1.21-alpine AS builder
+FROM golang:1.25.1-alpine AS builder
+
 
 WORKDIR /build
 
+ENV GOPROXY=https://goproxy.cn,direct
 # 安装必要的工具
 RUN apk add --no-cache git
 

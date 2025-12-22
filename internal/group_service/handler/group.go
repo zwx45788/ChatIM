@@ -1,4 +1,4 @@
-package handler
+﻿package handler
 
 import (
 	"context"
@@ -40,7 +40,7 @@ func (h *GroupHandler) CreateGroup(ctx context.Context, req *pb.CreateGroupReque
 	createdAt := time.Now().Format("2006-01-02 15:04:05")
 
 	// 1. 创建群组
-	query := `INSERT INTO groups (id, name, description, creator_id, created_at) VALUES (?, ?, ?, ?, ?)`
+	query := "INSERT INTO `groups` (id, name, description, creator_id, created_at) VALUES (?, ?, ?, ?, ?)"
 	_, err = h.db.ExecContext(ctx, query, groupID, req.Name, req.Description, creatorID, createdAt)
 	if err != nil {
 		log.Printf("Failed to create group: %v", err)
@@ -100,7 +100,7 @@ func (h *GroupHandler) GetGroupInfo(ctx context.Context, req *pb.GetGroupInfoReq
 
 	query := `
 		SELECT g.id, g.name, g.description, g.creator_id, g.created_at, COUNT(gm.user_id)
-		FROM groups g
+		FROM ` + "`groups`" + ` g
 		LEFT JOIN group_members gm ON g.id = gm.group_id
 		WHERE g.id = ?
 		GROUP BY g.id`
@@ -232,7 +232,7 @@ func (h *GroupHandler) ListGroups(ctx context.Context, req *pb.ListGroupsRequest
 	// 查询用户所在的群组
 	query := `
 		SELECT g.id, g.name, g.description, g.creator_id, g.created_at, COUNT(gm.user_id)
-		FROM groups g
+		FROM ` + "`groups`" + ` g
 		INNER JOIN group_members gm ON g.id = gm.group_id
 		WHERE g.id IN (SELECT group_id FROM group_members WHERE user_id = ?)
 		GROUP BY g.id
@@ -274,7 +274,7 @@ func (h *GroupHandler) ListGroups(ctx context.Context, req *pb.ListGroupsRequest
 	// 获取总数
 	var total int32
 	h.db.QueryRowContext(ctx,
-		"SELECT COUNT(DISTINCT g.id) FROM groups g INNER JOIN group_members gm ON g.id = gm.group_id WHERE gm.user_id = ?",
+		"SELECT COUNT(DISTINCT g.id) FROM `groups` g INNER JOIN group_members gm ON g.id = gm.group_id WHERE gm.user_id = ?",
 		userID).Scan(&total)
 
 	return &pb.ListGroupsResponse{
@@ -299,7 +299,7 @@ func (h *GroupHandler) SendGroupJoinRequest(ctx context.Context, req *pb.SendGro
 	// 1. 验证群组是否存在
 	var groupExists int
 	err = h.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM groups WHERE id = ? AND is_deleted = 0",
+		"SELECT COUNT(*) FROM `groups` WHERE id = ? AND is_deleted = 0",
 		req.GroupId).Scan(&groupExists)
 	if err != nil || groupExists == 0 {
 		return nil, status.Errorf(codes.NotFound, "群组不存在")
@@ -580,7 +580,7 @@ func (h *GroupHandler) GetMyGroupJoinRequests(ctx context.Context, req *pb.GetMy
 		SELECT gjr.id, gjr.group_id, g.name, gjr.from_user_id, gjr.message, 
 		       gjr.status, gjr.reviewed_by, gjr.created_at, gjr.processed_at
 		FROM group_join_requests gjr
-		LEFT JOIN groups g ON gjr.group_id = g.id
+		LEFT JOIN ` + "`groups`" + ` g ON gjr.group_id = g.id
 		WHERE gjr.from_user_id = ? ` + whereClause + `
 		ORDER BY gjr.created_at DESC
 		LIMIT ? OFFSET ?`
@@ -697,7 +697,7 @@ func (h *GroupHandler) UpdateGroupInfo(ctx context.Context, req *pb.UpdateGroupI
 
 	// 3. 执行更新
 	args = append(args, req.GroupId)
-	query := fmt.Sprintf("UPDATE groups SET %s WHERE id = ?", strings.Join(updates, ", "))
+	query := fmt.Sprintf("UPDATE `groups` SET %s WHERE id = ?", strings.Join(updates, ", "))
 	_, err = h.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		log.Printf("Failed to update group info: %v", err)
@@ -759,7 +759,7 @@ func (h *GroupHandler) TransferOwner(ctx context.Context, req *pb.TransferOwnerR
 
 	// 4. 更新 groups 表的 creator_id
 	_, err = tx.ExecContext(ctx,
-		"UPDATE groups SET creator_id = ? WHERE id = ?",
+		"UPDATE `groups` SET creator_id = ? WHERE id = ?",
 		req.NewOwnerId, req.GroupId)
 	if err != nil {
 		log.Printf("Failed to update group creator: %v", err)
@@ -809,7 +809,7 @@ func (h *GroupHandler) DismissGroup(ctx context.Context, req *pb.DismissGroupReq
 	// 1. 检查群组是否存在
 	var creatorID string
 	err = h.db.QueryRowContext(ctx,
-		"SELECT creator_id FROM groups WHERE id = ? AND is_deleted = 0",
+		"SELECT creator_id FROM `groups` WHERE id = ? AND is_deleted = 0",
 		req.GroupId).Scan(&creatorID)
 	if err == sql.ErrNoRows {
 		return nil, status.Errorf(codes.NotFound, "群组不存在")
@@ -833,7 +833,7 @@ func (h *GroupHandler) DismissGroup(ctx context.Context, req *pb.DismissGroupReq
 
 	// 4. 软删除群组
 	_, err = tx.ExecContext(ctx,
-		"UPDATE groups SET is_deleted = 1 WHERE id = ?",
+		"UPDATE `groups` SET is_deleted = 1 WHERE id = ?",
 		req.GroupId)
 	if err != nil {
 		log.Printf("Failed to delete group: %v", err)
@@ -874,7 +874,7 @@ func (h *GroupHandler) SetAdmin(ctx context.Context, req *pb.SetAdminRequest) (*
 	// 1. 检查操作者是否是群主
 	var creatorID string
 	err = h.db.QueryRowContext(ctx,
-		"SELECT creator_id FROM groups WHERE id = ? AND is_deleted = 0",
+		"SELECT creator_id FROM `groups` WHERE id = ? AND is_deleted = 0",
 		req.GroupId).Scan(&creatorID)
 	if err == sql.ErrNoRows {
 		return nil, status.Errorf(codes.NotFound, "群组不存在")
@@ -1051,7 +1051,7 @@ func (h *GroupHandler) SearchGroups(ctx context.Context, req *pb.SearchGroupsReq
 	query := `
 		SELECT g.id, g.name, IFNULL(g.description, ''), IFNULL(g.avatar, ''),
 		       (SELECT COUNT(*) FROM group_members WHERE group_id = g.id AND is_deleted = 0) as member_count
-		FROM groups g
+		FROM ` + "`groups`" + ` g
 		WHERE (g.name LIKE ? OR g.description LIKE ?)
 		  AND g.is_deleted = 0
 		ORDER BY 
@@ -1094,7 +1094,7 @@ func (h *GroupHandler) SearchGroups(ctx context.Context, req *pb.SearchGroupsReq
 	var total int32
 	countQuery := `
 		SELECT COUNT(*) 
-		FROM groups 
+		FROM ` + "`groups`" + ` 
 		WHERE (name LIKE ? OR description LIKE ?) 
 		  AND is_deleted = 0`
 	h.db.QueryRowContext(ctx, countQuery, keyword, keyword).Scan(&total)

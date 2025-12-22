@@ -4,12 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
 	"time"
 
 	"ChatIM/internal/friendship/model"
+	"ChatIM/pkg/logger"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 // FriendshipRepository 好友相关的数据库操作
@@ -24,19 +25,64 @@ func NewFriendshipRepository(db *sql.DB) *FriendshipRepository {
 
 // ==================== 好友请求相关操作 ====================
 
+// GetFriendRequestByUsers 根据 from/to 获取请求（用于处理 unique(from,to)）
+func (r *FriendshipRepository) GetFriendRequestByUsers(ctx context.Context, fromUserID, toUserID string) (id string, status string, err error) {
+	query := `SELECT id, status FROM friend_requests WHERE from_user_id = ? AND to_user_id = ? LIMIT 1`
+	row := r.db.QueryRowContext(ctx, query, fromUserID, toUserID)
+	if err := row.Scan(&id, &status); err != nil {
+		return "", "", err
+	}
+	return id, status, nil
+}
+
+// ResetFriendRequestToPending 将历史请求重置为 pending（允许再次发送）
+func (r *FriendshipRepository) ResetFriendRequestToPending(ctx context.Context, requestID string, message string) error {
+	query := `UPDATE friend_requests
+	          SET message = ?, status = ?, processed_at = NULL, updated_at = ?, created_at = ?
+	          WHERE id = ?`
+	_, err := r.db.ExecContext(ctx, query, message, model.RequestStatusPending, time.Now(), time.Now(), requestID)
+	if err != nil {
+		logger.Error("Error resetting friend request", zap.Error(err), zap.String("request_id", requestID))
+		return err
+	}
+	return nil
+}
+
+// UserExists 检查用户是否存在（避免外键错误被包装成 Internal）
+func (r *FriendshipRepository) UserExists(ctx context.Context, userID string) (bool, error) {
+	query := `SELECT COUNT(*) FROM users WHERE id = ?`
+	var count int
+	if err := r.db.QueryRowContext(ctx, query, userID).Scan(&count); err != nil {
+		logger.Error("Error checking user exists", zap.Error(err), zap.String("user_id", userID))
+		return false, err
+	}
+	return count > 0, nil
+}
+
 // SendFriendRequest 发送好友请求
 func (r *FriendshipRepository) SendFriendRequest(ctx context.Context, fromUserID, toUserID, message string) (string, error) {
-	requestID := uuid.New().String()
-
-	query := `INSERT INTO friend_requests (id, from_user_id, to_user_id, message, status, created_at)
-	          VALUES (?, ?, ?, ?, ?, ?)`
-
-	_, err := r.db.ExecContext(ctx, query, requestID, fromUserID, toUserID, message, model.RequestStatusPending, time.Now())
-	if err != nil {
-		log.Printf("Error sending friend request: %v", err)
-		return "", err
+	// 先查是否存在历史记录（表上通常有 unique(from_user_id,to_user_id)）
+	if existingID, existingStatus, err := r.GetFriendRequestByUsers(ctx, fromUserID, toUserID); err == nil {
+		// pending 理论上应当被上层拦截，但这里兜底
+		if existingStatus == model.RequestStatusPending {
+			return existingID, nil
+		}
+		// 历史请求已处理/取消：重置为 pending，实现“可再次发送”
+		if err := r.ResetFriendRequestToPending(ctx, existingID, message); err != nil {
+			logger.Error("Error resending friend request", zap.Error(err), zap.String("from_user_id", fromUserID), zap.String("to_user_id", toUserID))
+			return "", err
+		}
+		return existingID, nil
 	}
 
+	requestID := uuid.New().String()
+	query := `INSERT INTO friend_requests (id, from_user_id, to_user_id, message, status, created_at)
+	          VALUES (?, ?, ?, ?, ?, ?)`
+	_, err := r.db.ExecContext(ctx, query, requestID, fromUserID, toUserID, message, model.RequestStatusPending, time.Now())
+	if err != nil {
+		logger.Error("Error sending friend request", zap.Error(err), zap.String("from_user_id", fromUserID), zap.String("to_user_id", toUserID))
+		return "", err
+	}
 	return requestID, nil
 }
 
@@ -89,7 +135,7 @@ func (r *FriendshipRepository) GetFriendRequests(ctx context.Context, toUserID s
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		log.Printf("Error querying friend requests: %v", err)
+		logger.Error("Error querying friend requests", zap.Error(err), zap.String("to_user_id", toUserID))
 		return nil, err
 	}
 	defer rows.Close()
@@ -107,7 +153,7 @@ func (r *FriendshipRepository) GetFriendRequests(ctx context.Context, toUserID s
 			&req.CreatedAt,
 		)
 		if err != nil {
-			log.Printf("Error scanning friend request: %v", err)
+			logger.Warn("Error scanning friend request", zap.Error(err))
 			continue
 		}
 		requests = append(requests, &req)
@@ -133,7 +179,7 @@ func (r *FriendshipRepository) CountFriendRequests(ctx context.Context, toUserID
 	var count int32
 	err := r.db.QueryRowContext(ctx, query, args...).Scan(&count)
 	if err != nil {
-		log.Printf("Error counting friend requests: %v", err)
+		logger.Error("Error counting friend requests", zap.Error(err), zap.String("to_user_id", toUserID))
 		return 0, err
 	}
 
@@ -144,7 +190,7 @@ func (r *FriendshipRepository) CountFriendRequests(ctx context.Context, toUserID
 func (r *FriendshipRepository) AcceptFriendRequest(ctx context.Context, requestID string) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		log.Printf("Error starting transaction: %v", err)
+		logger.Error("Error starting transaction", zap.Error(err), zap.String("request_id", requestID))
 		return err
 	}
 	defer tx.Rollback()
@@ -154,7 +200,7 @@ func (r *FriendshipRepository) AcceptFriendRequest(ctx context.Context, requestI
 	var fromUserID, toUserID string
 	err = tx.QueryRowContext(ctx, query, requestID).Scan(&fromUserID, &toUserID)
 	if err != nil {
-		log.Printf("Error getting friend request: %v", err)
+		logger.Error("Error getting friend request", zap.Error(err), zap.String("request_id", requestID))
 		return err
 	}
 
@@ -162,7 +208,7 @@ func (r *FriendshipRepository) AcceptFriendRequest(ctx context.Context, requestI
 	updateQuery := `UPDATE friend_requests SET status = ?, processed_at = ?, updated_at = ? WHERE id = ?`
 	_, err = tx.ExecContext(ctx, updateQuery, model.RequestStatusAccepted, time.Now(), time.Now(), requestID)
 	if err != nil {
-		log.Printf("Error updating friend request status: %v", err)
+		logger.Error("Error updating friend request status", zap.Error(err), zap.String("request_id", requestID))
 		return err
 	}
 
@@ -178,17 +224,17 @@ func (r *FriendshipRepository) AcceptFriendRequest(ctx context.Context, requestI
 	                   ON DUPLICATE KEY UPDATE created_at = created_at`
 	_, err = tx.ExecContext(ctx, addFriendQuery, user1, user2, time.Now())
 	if err != nil {
-		log.Printf("Error adding friend: %v", err)
+		logger.Error("Error adding friend", zap.Error(err), zap.String("user1", user1), zap.String("user2", user2))
 		return err
 	}
 
 	// 提交事务
 	if err = tx.Commit(); err != nil {
-		log.Printf("Error committing transaction: %v", err)
+		logger.Error("Error committing transaction", zap.Error(err), zap.String("request_id", requestID))
 		return err
 	}
 
-	log.Printf("Friend request %s accepted: %s <-> %s", requestID, fromUserID, toUserID)
+	logger.Info("Friend request accepted", zap.String("request_id", requestID), zap.String("from_user_id", fromUserID), zap.String("to_user_id", toUserID))
 	return nil
 }
 
@@ -197,11 +243,11 @@ func (r *FriendshipRepository) RejectFriendRequest(ctx context.Context, requestI
 	query := `UPDATE friend_requests SET status = ?, processed_at = ?, updated_at = ? WHERE id = ?`
 	_, err := r.db.ExecContext(ctx, query, model.RequestStatusRejected, time.Now(), time.Now(), requestID)
 	if err != nil {
-		log.Printf("Error rejecting friend request: %v", err)
+		logger.Error("Error rejecting friend request", zap.Error(err), zap.String("request_id", requestID))
 		return err
 	}
 
-	log.Printf("Friend request %s rejected", requestID)
+	logger.Info("Friend request rejected", zap.String("request_id", requestID))
 	return nil
 }
 
@@ -218,7 +264,7 @@ func (r *FriendshipRepository) CheckFriendshipExists(ctx context.Context, userID
 	var count int
 	err := r.db.QueryRowContext(ctx, query, user1, user2).Scan(&count)
 	if err != nil {
-		log.Printf("Error checking friendship: %v", err)
+		logger.Error("Error checking friendship", zap.Error(err), zap.String("user1", user1), zap.String("user2", user2))
 		return false, err
 	}
 
@@ -232,7 +278,7 @@ func (r *FriendshipRepository) CheckPendingFriendRequest(ctx context.Context, fr
 	var count int
 	err := r.db.QueryRowContext(ctx, query, fromUserID, toUserID, model.RequestStatusPending).Scan(&count)
 	if err != nil {
-		log.Printf("Error checking pending friend request: %v", err)
+		logger.Error("Error checking pending friend request", zap.Error(err), zap.String("from_user_id", fromUserID), zap.String("to_user_id", toUserID))
 		return false, err
 	}
 
@@ -256,7 +302,7 @@ func (r *FriendshipRepository) GetFriends(ctx context.Context, userID string, li
 
 	rows, err := r.db.QueryContext(ctx, query, userID, userID, userID, limit, offset)
 	if err != nil {
-		log.Printf("Error querying friends: %v", err)
+		logger.Error("Error querying friends", zap.Error(err), zap.String("user_id", userID))
 		return nil, err
 	}
 	defer rows.Close()
@@ -267,7 +313,7 @@ func (r *FriendshipRepository) GetFriends(ctx context.Context, userID string, li
 		var createdAt time.Time
 		err := rows.Scan(&friendID, &username, &nickname, &createdAt)
 		if err != nil {
-			log.Printf("Error scanning friend: %v", err)
+			logger.Warn("Error scanning friend", zap.Error(err))
 			continue
 		}
 		friends = append(friends, map[string]interface{}{
@@ -288,7 +334,7 @@ func (r *FriendshipRepository) CountFriends(ctx context.Context, userID string) 
 	var count int32
 	err := r.db.QueryRowContext(ctx, query, userID, userID).Scan(&count)
 	if err != nil {
-		log.Printf("Error counting friends: %v", err)
+		logger.Error("Error counting friends", zap.Error(err), zap.String("user_id", userID))
 		return 0, err
 	}
 
@@ -307,13 +353,13 @@ func (r *FriendshipRepository) RemoveFriend(ctx context.Context, userID1, userID
 	query := `DELETE FROM friends WHERE user_id_1 = ? AND user_id_2 = ?`
 	result, err := r.db.ExecContext(ctx, query, user1, user2)
 	if err != nil {
-		log.Printf("Error removing friend: %v", err)
+		logger.Error("Error removing friend", zap.Error(err), zap.String("user1", user1), zap.String("user2", user2))
 		return err
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		log.Printf("Error getting rows affected: %v", err)
+		logger.Error("Error getting rows affected", zap.Error(err))
 		return err
 	}
 
@@ -321,7 +367,7 @@ func (r *FriendshipRepository) RemoveFriend(ctx context.Context, userID1, userID
 		return fmt.Errorf("friendship not found")
 	}
 
-	log.Printf("Friend relationship removed: %s <-> %s", user1, user2)
+	logger.Info("Friend relationship removed", zap.String("user1", user1), zap.String("user2", user2))
 	return nil
 }
 
@@ -341,7 +387,7 @@ func (r *FriendshipRepository) GetUserGroups(ctx context.Context, userID string,
 
 	rows, err := r.db.QueryContext(ctx, query, userID, limit, offset)
 	if err != nil {
-		log.Printf("Error querying user groups: %v", err)
+		logger.Error("Error querying user groups", zap.Error(err), zap.String("user_id", userID))
 		return nil, err
 	}
 	defer rows.Close()
@@ -353,7 +399,7 @@ func (r *FriendshipRepository) GetUserGroups(ctx context.Context, userID string,
 		var createdAt time.Time
 
 		if err := rows.Scan(&id, &name, &description, &memberCount, &createdAt); err != nil {
-			log.Printf("Error scanning group row: %v", err)
+			logger.Error("Error scanning group row", zap.Error(err))
 			return nil, err
 		}
 
@@ -367,7 +413,7 @@ func (r *FriendshipRepository) GetUserGroups(ctx context.Context, userID string,
 	}
 
 	if err := rows.Err(); err != nil {
-		log.Printf("Error iterating groups: %v", err)
+		logger.Error("Error iterating groups", zap.Error(err))
 		return nil, err
 	}
 
@@ -385,7 +431,7 @@ func (r *FriendshipRepository) CountUserGroups(ctx context.Context, userID strin
 
 	var count int32
 	if err := r.db.QueryRowContext(ctx, query, userID).Scan(&count); err != nil {
-		log.Printf("Error counting user groups: %v", err)
+		logger.Error("Error counting user groups", zap.Error(err), zap.String("user_id", userID))
 		return 0, err
 	}
 
@@ -399,13 +445,13 @@ func (r *FriendshipRepository) LeaveGroup(ctx context.Context, groupID, userID s
 	query := `DELETE FROM group_members WHERE group_id = ? AND user_id = ?`
 	result, err := r.db.ExecContext(ctx, query, groupID, userID)
 	if err != nil {
-		log.Printf("Error leaving group: %v", err)
+		logger.Error("Error leaving group", zap.Error(err), zap.String("group_id", groupID), zap.String("user_id", userID))
 		return err
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		log.Printf("Error getting rows affected: %v", err)
+		logger.Error("Error getting rows affected", zap.Error(err))
 		return err
 	}
 
@@ -413,7 +459,7 @@ func (r *FriendshipRepository) LeaveGroup(ctx context.Context, groupID, userID s
 		return fmt.Errorf("用户不在该群组中")
 	}
 
-	log.Printf("User %s left group %s", userID, groupID)
+	logger.Info("User left group", zap.String("user_id", userID), zap.String("group_id", groupID))
 	return nil
 }
 
@@ -422,13 +468,13 @@ func (r *FriendshipRepository) RemoveGroupMember(ctx context.Context, groupID, m
 	query := `DELETE FROM group_members WHERE group_id = ? AND user_id = ?`
 	result, err := r.db.ExecContext(ctx, query, groupID, memberUserID)
 	if err != nil {
-		log.Printf("Error removing group member: %v", err)
+		logger.Error("Error removing group member", zap.Error(err), zap.String("group_id", groupID), zap.String("member_id", memberUserID))
 		return err
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		log.Printf("Error getting rows affected: %v", err)
+		logger.Error("Error getting rows affected", zap.Error(err))
 		return err
 	}
 
@@ -436,7 +482,7 @@ func (r *FriendshipRepository) RemoveGroupMember(ctx context.Context, groupID, m
 		return fmt.Errorf("用户不在该群组中")
 	}
 
-	log.Printf("User %s removed from group %s", memberUserID, groupID)
+	logger.Info("User removed from group", zap.String("member_id", memberUserID), zap.String("group_id", groupID))
 	return nil
 }
 
@@ -446,7 +492,7 @@ func (r *FriendshipRepository) CheckGroupMembership(ctx context.Context, groupID
 	var count int
 	err := r.db.QueryRowContext(ctx, query, groupID, userID).Scan(&count)
 	if err != nil {
-		log.Printf("Error checking group membership: %v", err)
+		logger.Error("Error checking group membership", zap.Error(err), zap.String("group_id", groupID), zap.String("user_id", userID))
 		return false, err
 	}
 
@@ -459,7 +505,7 @@ func (r *FriendshipRepository) CheckGroupOwner(ctx context.Context, groupID, use
 	var ownerID string
 	err := r.db.QueryRowContext(ctx, query, groupID).Scan(&ownerID)
 	if err != nil {
-		log.Printf("Error checking group owner: %v", err)
+		logger.Error("Error checking group owner", zap.Error(err), zap.String("group_id", groupID), zap.String("user_id", userID))
 		return false, err
 	}
 

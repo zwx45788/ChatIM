@@ -1,15 +1,15 @@
 import { useMainStore } from '../store.js';
-import { useRouter, useRoute } from 'vue-router';
+import { router } from '../router.js';
 import { computed } from 'vue';
 
 export default {
     setup() {
         const store = useMainStore();
-        const router = useRouter();
-        const route = useRoute();
+        
+        const route = router.currentRoute;
         
         const user = computed(() => store.user);
-        const currentPath = computed(() => route.path);
+        const currentPath = computed(() => route.value?.path || '/');
 
         const navItems = [
             { path: '/chat', icon: 'fas fa-comment', label: '聊天' },

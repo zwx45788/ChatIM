@@ -12,6 +12,8 @@ type Config struct {
 	Server   ServerConfig   `mapstructure:"server"`
 	Database DatabaseConfig `mapstructure:"database"`
 	JWT      JWTConfig      `mapstructure:"jwt"`
+	OSS      OSSConfig      `mapstructure:"oss"`
+	Log      LogConfig      `mapstructure:"log"`
 }
 
 type ServerConfig struct {
@@ -43,6 +45,19 @@ type RedisConfig struct {
 
 type JWTConfig struct {
 	Secret string `mapstructure:"secret"`
+}
+
+type OSSConfig struct {
+	AccessKeyID     string `mapstructure:"access_key_id"`
+	AccessKeySecret string `mapstructure:"access_key_secret"`
+	Endpoint        string `mapstructure:"endpoint"`
+	BucketName      string `mapstructure:"bucket_name"`
+}
+
+type LogConfig struct {
+	Level      string `mapstructure:"level"`       // debug, info, warn, error
+	OutputPath string `mapstructure:"output_path"` // 日志文件路径（留空则输出到控制台）
+	DevMode    bool   `mapstructure:"dev_mode"`    // 开发模式
 }
 
 // LoadConfig 加载配置文件

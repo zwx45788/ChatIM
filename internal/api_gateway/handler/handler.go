@@ -1,15 +1,18 @@
 package handler
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"strconv"
 
+	friendPb "ChatIM/api/proto/friendship"
 	grpPb "ChatIM/api/proto/group"
 	msgPb "ChatIM/api/proto/message"
 	pb "ChatIM/api/proto/user"
 	"ChatIM/internal/api_gateway/middleware"
 	"ChatIM/pkg/config"
+	"ChatIM/pkg/oss"
 
 	"github.com/gin-gonic/gin"
 	"google.golang.org/grpc"
@@ -17,10 +20,22 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
+// withAuthMetadata attaches Authorization header into outgoing gRPC context.
+func withAuthMetadata(c *gin.Context) context.Context {
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		return c.Request.Context()
+	}
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	return metadata.NewOutgoingContext(c.Request.Context(), md)
+}
+
 type UserGatewayHandler struct {
-	userClient    pb.UserServiceClient
-	messageClient msgPb.MessageServiceClient
-	groupClient   grpPb.GroupServiceClient
+	userClient       pb.UserServiceClient
+	messageClient    msgPb.MessageServiceClient
+	groupClient      grpPb.GroupServiceClient
+	friendshipClient friendPb.FriendshipServiceClient
+	ossClient        *oss.OSSClient
 }
 
 func NewUserGatewayHandler() (*UserGatewayHandler, error) {
@@ -73,15 +88,114 @@ func NewUserGatewayHandler() (*UserGatewayHandler, error) {
 		return nil, err
 	}
 
+	// 连接到 friendship-service
+	friendshipAddr := cfg.Server.FriendshipGRPCAddr
+	if friendshipAddr == "" {
+		friendshipAddr = "127.0.0.1" + cfg.Server.FriendshipGRPCPort
+	}
+	log.Printf("Connecting to Friendship Service at: %s", friendshipAddr)
+
+	frConn, err := grpc.Dial(friendshipAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Printf("did not connect to friendship service: %v", err)
+		return nil, err
+	}
+
+	// 初始化OSS客户端
+	ossClient := oss.NewOSSClient(
+		cfg.OSS.AccessKeyID,
+		cfg.OSS.AccessKeySecret,
+		cfg.OSS.Endpoint,
+		cfg.OSS.BucketName,
+	)
+
 	return &UserGatewayHandler{
-		userClient:    pb.NewUserServiceClient(userConn),
-		messageClient: msgPb.NewMessageServiceClient(msgConn),
-		groupClient:   grpPb.NewGroupServiceClient(grpConn),
+		userClient:       pb.NewUserServiceClient(userConn),
+		messageClient:    msgPb.NewMessageServiceClient(msgConn),
+		groupClient:      grpPb.NewGroupServiceClient(grpConn),
+		friendshipClient: friendPb.NewFriendshipServiceClient(frConn),
+		ossClient:        ossClient,
 	}, nil
 }
 
+// ==================== 好友相关 API 转发 ====================
+
+// SendFriendRequest POST /friends/requests
+func (h *UserGatewayHandler) SendFriendRequest(c *gin.Context) {
+	var req friendPb.SendFriendRequestRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+		return
+	}
+
+	ctx := withAuthMetadata(c)
+	res, err := h.friendshipClient.SendFriendRequest(ctx, &req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": res.Code, "message": res.Message, "request_id": res.RequestId})
+}
+
+// GetFriendRequests GET /friends/requests
+func (h *UserGatewayHandler) GetFriendRequests(c *gin.Context) {
+	statusStr := c.DefaultQuery("status", "pending")
+	status := int32(0)
+	switch statusStr {
+	case "pending":
+		status = 0
+	case "approved":
+		status = 1
+	case "rejected":
+		status = 2
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+
+	ctx := withAuthMetadata(c)
+	res, err := h.friendshipClient.GetFriendRequests(ctx, &friendPb.GetFriendRequestsRequest{
+		Status: int32(status),
+		Limit:  int64(limit),
+		Offset: int64(offset),
+	})
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": res.Code, "message": res.Message, "requests": res.Requests, "total": res.Total})
+}
+
+// ProcessFriendRequest POST /friends/requests/handle
+func (h *UserGatewayHandler) ProcessFriendRequest(c *gin.Context) {
+	var req friendPb.ProcessFriendRequestRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+		return
+	}
+
+	ctx := withAuthMetadata(c)
+	res, err := h.friendshipClient.ProcessFriendRequest(ctx, &req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": res.Code, "message": res.Message})
+}
+
+// GetFriends GET /friends
+func (h *UserGatewayHandler) GetFriends(c *gin.Context) {
+	ctx := withAuthMetadata(c)
+	res, err := h.friendshipClient.GetFriends(ctx, &friendPb.GetFriendsRequest{})
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": res.Code, "message": res.Message, "data": res.Friends})
+}
+
 func (h *UserGatewayHandler) GetUserByID(c *gin.Context) {
-	userID := c.Param("id")
+	userID := c.Param("user_id")
 	res, err := h.userClient.GetUserByID(c.Request.Context(), &pb.GetUserRequest{Id: userID})
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
@@ -398,37 +512,6 @@ func (h *UserGatewayHandler) PullMessage(c *gin.Context) {
 	c.JSON(statusCode, res)
 }
 
-// MarkMessagesAsRead 标记消息已读
-func (h *UserGatewayHandler) MarkMessagesAsRead(c *gin.Context) {
-	var req msgPb.MarkMessagesAsReadRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
-		return
-	}
-
-	md := metadata.New(map[string]string{"authorization": authHeader})
-	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
-
-	res, err := h.messageClient.MarkMessagesAsRead(ctx, &req)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	statusCode := http.StatusOK
-	if res.Code != 0 {
-		statusCode = http.StatusInternalServerError
-	}
-
-	c.JSON(statusCode, res)
-}
-
 // GetUnreadCount 获取未读消息数
 func (h *UserGatewayHandler) GetUnreadCount(c *gin.Context) {
 	authHeader := c.GetHeader("Authorization")
@@ -563,6 +646,13 @@ func (h *UserGatewayHandler) AddGroupMember(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
 		return
 	}
+
+	groupID := c.Param("group_id")
+	if groupID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "group_id is required"})
+		return
+	}
+	req.GroupId = groupID
 
 	authHeader := c.GetHeader("Authorization")
 	if authHeader == "" {
@@ -783,6 +873,47 @@ func (h *UserGatewayHandler) SearchGroups(c *gin.Context) {
 		statusCode = http.StatusInternalServerError
 	}
 	c.JSON(statusCode, res)
+}
+
+// ==================== 文件上传相关接口 ====================
+
+// GetUploadSignature 获取OSS上传签名
+func (h *UserGatewayHandler) GetUploadSignature(c *gin.Context) {
+	fileType := c.DefaultQuery("type", "file") // image 或 file
+
+	// 验证文件类型
+	if fileType != "image" && fileType != "file" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    1001,
+			"message": "无效的文件类型，只支持 image 或 file",
+		})
+		return
+	}
+
+	// 设置文件大小限制
+	var maxSize int64
+	if fileType == "image" {
+		maxSize = 10 * 1024 * 1024 // 10MB
+	} else {
+		maxSize = 50 * 1024 * 1024 // 50MB
+	}
+
+	// 生成上传签名
+	signature, err := h.ossClient.GenerateUploadSignature(fileType, maxSize)
+	if err != nil {
+		log.Printf("Failed to generate upload signature: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    1002,
+			"message": "生成上传签名失败",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "成功",
+		"data":    signature,
+	})
 }
 
 // ==================== 群加入请求相关接口 ====================

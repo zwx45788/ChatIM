@@ -48,10 +48,14 @@ export const useMainStore = defineStore('main', {
             if (!this.token) return;
             try {
                 const friendsRes = await api.getFriends(this.token);
-                this.friends = friendsRes.data || [];
+                this.friends = (friendsRes.data || []).map(f => ({
+                    id: f.user_id || f.id,
+                    username: f.username,
+                    nickname: f.nickname
+                }));
                 
                 const groupsRes = await api.getGroups(this.token);
-                this.groups = groupsRes.data || [];
+                this.groups = groupsRes.groups || [];
             } catch (e) {
                 console.error("Failed to fetch contacts", e);
             }
@@ -86,16 +90,16 @@ export const useMainStore = defineStore('main', {
             try {
                 // 拉取私聊
                 const privateRes = await api.pullPrivateUnread(this.token);
-                if (privateRes.data) {
-                    privateRes.data.forEach(msg => {
-                        // 对方发给我的，ID是 sender_id
-                        // 我发给对方的（多端同步），ID是 receiver_id
+                if (privateRes.messages) {
+                    privateRes.messages.forEach(msg => {
+                        // 对方发给我的，ID是 from_user_id
+                        // 我发给对方的（多端同步），ID是 to_user_id
                         // 这里简化，假设拉取到的都是别人发给我的
-                        this.addMessage('private', msg.sender_id, {
-                            id: msg.id,
-                            sender_id: msg.sender_id,
+                        this.addMessage('private', msg.from_user_id, {
+                            id: msg.msg_id,
+                            sender_id: msg.from_user_id,
                             content: msg.content,
-                            type: msg.type,
+                            type: msg.msg_type,
                             created_at: msg.created_at,
                             is_self: false
                         });
@@ -104,16 +108,16 @@ export const useMainStore = defineStore('main', {
                 
                 // 拉取群聊
                 const groupRes = await api.pullGroupUnread(this.token);
-                if (groupRes.data) {
-                    groupRes.data.forEach(msg => {
+                if (groupRes.group_messages) {
+                    groupRes.group_messages.forEach(msg => {
                         this.addMessage('group', msg.group_id, {
-                            id: msg.id,
-                            sender_id: msg.sender_id,
+                            id: msg.msg_id,
+                            sender_id: msg.from_user_id,
                             group_id: msg.group_id,
                             content: msg.content,
-                            type: msg.type,
+                            type: msg.msg_type,
                             created_at: msg.created_at,
-                            is_self: msg.sender_id === this.user.id
+                            is_self: msg.from_user_id === this.user.id
                         });
                     });
                 }
@@ -122,7 +126,7 @@ export const useMainStore = defineStore('main', {
             }
         },
         
-        async sendMessage(content, msgType = 1) {
+        async sendMessage(content, msgType = 'text') {
             if (!this.currentSession || !this.token) return;
             
             const { type, id } = this.currentSession;

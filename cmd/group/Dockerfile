@@ -3,6 +3,7 @@ FROM golang:1.25.1-alpine AS builder
 
 WORKDIR /app
 
+ENV GOPROXY=https://goproxy.cn,direct
 # 安装必要的工具
 RUN apk add --no-cache git
 
