@@ -26,6 +26,8 @@ type ServerConfig struct {
 	MessageGRPCAddr    string `mapstructure:"message_grpc_addr"`    // 新增：Message Service 地址（用于 API Gateway 连接）
 	GroupGRPCAddr      string `mapstructure:"group_grpc_addr"`      // 新增：Group Service 地址（用于 API Gateway 连接）
 	FriendshipGRPCAddr string `mapstructure:"friendship_grpc_addr"` // 新增：Friendship Service 地址
+	CertFile           string `mapstructure:"cert_file"`            // SSL 证书文件路径
+	KeyFile            string `mapstructure:"key_file"`             // SSL 密钥文件路径
 }
 
 type DatabaseConfig struct {

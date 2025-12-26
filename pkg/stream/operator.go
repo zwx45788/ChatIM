@@ -39,12 +39,48 @@ type MessagePayload struct {
 	ReadAt     int64  `json:"read_at"`
 }
 
-// AddPrivateMessage 添加私聊消息到 Stream
+// AddPrivateMessage 添加私聊消息到 Stream（同时写入发送者和接收者的 stream）
 func (so *StreamOperator) AddPrivateMessage(ctx context.Context, msgID, fromUserID, toUserID, content string) (string, error) {
-	streamKey := fmt.Sprintf("stream:private:%s", toUserID)
 	now := time.Now()
 
-	payload := map[string]interface{}{
+	// 1. 写入发送者的 Stream（用于消息回显和多设备同步）
+	// 发送者看到的消息标记为已读
+	senderPayload := map[string]interface{}{
+		"id":           msgID,
+		"from_user_id": fromUserID,
+		"to_user_id":   toUserID,
+		"content":      content,
+		"created_at":   now.Unix(),
+		"msg_type":     "text",
+		"is_read":      "true", // 发送者自己的消息默认已读
+		"read_at":      fmt.Sprintf("%d", now.Unix()),
+		"type":         "private",
+	}
+
+	fromStreamKey := fmt.Sprintf("stream:private:%s", fromUserID)
+	senderStreamID, err := so.rdb.XAdd(ctx, &redis.XAddArgs{
+		Stream: fromStreamKey,
+		Values: senderPayload,
+	}).Result()
+
+	if err != nil {
+		// 如果是给自己发消息，这就是唯一的写入，必须报错
+		if fromUserID == toUserID {
+			logger.Error("Error adding private message to self stream", zap.Error(err), zap.String("msg_id", msgID))
+			return "", err
+		}
+		// 如果是发给别人，发送者流写入失败可以容忍（只是回显失败），但最好记录日志
+		logger.Warn("Failed to add private message to sender stream", zap.Error(err), zap.String("msg_id", msgID))
+	}
+
+	// 如果是给自己发消息，只写一条，直接返回
+	if fromUserID == toUserID {
+		logger.Debug("Private message added to self stream", zap.String("msg_id", msgID), zap.String("stream_id", senderStreamID))
+		return senderStreamID, nil
+	}
+
+	// 2. 写入接收者的 Stream
+	receiverPayload := map[string]interface{}{
 		"id":           msgID,
 		"from_user_id": fromUserID,
 		"to_user_id":   toUserID,
@@ -53,20 +89,21 @@ func (so *StreamOperator) AddPrivateMessage(ctx context.Context, msgID, fromUser
 		"msg_type":     "text",
 		"is_read":      "false",
 		"read_at":      "0",
+		"type":         "private", // 标识这是私聊消息
 	}
 
-	// 写入 Stream
+	toStreamKey := fmt.Sprintf("stream:private:%s", toUserID)
 	msgStreamID, err := so.rdb.XAdd(ctx, &redis.XAddArgs{
-		Stream: streamKey,
-		Values: payload,
+		Stream: toStreamKey,
+		Values: receiverPayload,
 	}).Result()
 
 	if err != nil {
-		logger.Error("Error adding private message to stream", zap.Error(err), zap.String("msg_id", msgID))
+		logger.Error("Error adding private message to receiver stream", zap.Error(err), zap.String("msg_id", msgID))
 		return "", err
 	}
 
-	logger.Debug("Private message added to stream", zap.String("msg_id", msgID), zap.String("stream_id", msgStreamID))
+	logger.Debug("Private message added to both streams", zap.String("msg_id", msgID), zap.String("stream_id", msgStreamID))
 	return msgStreamID, nil
 }
 
@@ -90,16 +127,21 @@ func (so *StreamOperator) AddGroupMessageToMembers(ctx context.Context, msgID, g
 	// 遍历所有群成员，写入各自的 stream:private:{user_id}
 	successCount := 0
 	for _, memberID := range memberIDs {
-		// 跳过发送者本人（可选，取决于产品需求）
-		if memberID == fromUserID {
-			continue
-		}
-
 		streamKey := fmt.Sprintf("stream:private:%s", memberID)
+
+		// 为发送者标记消息为已读（用于消息回显）
+		memberPayload := make(map[string]interface{})
+		for k, v := range payload {
+			memberPayload[k] = v
+		}
+		if memberID == fromUserID {
+			memberPayload["is_read"] = "true"
+			memberPayload["read_at"] = fmt.Sprintf("%d", now.Unix())
+		}
 
 		_, err := so.rdb.XAdd(ctx, &redis.XAddArgs{
 			Stream: streamKey,
-			Values: payload,
+			Values: memberPayload,
 		}).Result()
 
 		if err != nil {
@@ -725,4 +767,58 @@ func (so *StreamOperator) CreateConversation(ctx context.Context, userID, conver
 
 	logger.Info("Created conversation", zap.String("conversation_id", conversationID), zap.String("user_id", userID))
 	return nil
+}
+
+// ==================== 已读游标管理 ====================
+
+// GetUserCursor 获取用户级已读游标（私聊+群聊共用）
+func (so *StreamOperator) GetUserCursor(ctx context.Context, userID string) (string, error) {
+	key := fmt.Sprintf("cursor:user:%s", userID)
+	cursor, err := so.rdb.Get(ctx, key).Result()
+	if err == redis.Nil {
+		return "0-0", nil // 默认从最开始
+	}
+	if err != nil {
+		logger.Error("Error getting user cursor", zap.Error(err), zap.String("user_id", userID))
+		return "0-0", err
+	}
+	return cursor, nil
+}
+
+// SetUserCursor 设置用户级已读游标（只允许前进）
+func (so *StreamOperator) SetUserCursor(ctx context.Context, userID, newCursor string) error {
+	key := fmt.Sprintf("cursor:user:%s", userID)
+
+	currentCursor, _ := so.GetUserCursor(ctx, userID)
+
+	if compareCursors(newCursor, currentCursor) <= 0 {
+		logger.Debug("Cursor not updated (would move backward)",
+			zap.String("user_id", userID),
+			zap.String("current", currentCursor),
+			zap.String("new", newCursor))
+		return nil // 幂等，直接返回成功
+	}
+
+	err := so.rdb.Set(ctx, key, newCursor, 0).Err()
+	if err != nil {
+		logger.Error("Error setting user cursor", zap.Error(err))
+		return err
+	}
+
+	logger.Info("User cursor updated",
+		zap.String("user_id", userID),
+		zap.String("cursor", newCursor))
+	return nil
+}
+
+// compareCursors 比较两个 Redis Stream ID
+// 返回: -1 if a < b, 0 if a == b, 1 if a > b
+func compareCursors(a, b string) int {
+	if a == b {
+		return 0
+	}
+	if a > b {
+		return 1
+	}
+	return -1
 }

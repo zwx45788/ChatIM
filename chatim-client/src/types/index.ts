@@ -18,6 +18,7 @@ export interface Message {
   is_read?: boolean
   read_at?: number
   stream_id?: string
+  is_sender?: boolean
 }
 
 export interface Conversation {

@@ -32,11 +32,23 @@ export const messageApi = {
   createConversation(conversationId: string) {
     return request.post<any, FlatResponse<{}>>('/conversations', { conversation_id: conversationId })
   },
-  getMessages(params: { limit?: number, auto_mark?: boolean, include_read?: boolean }) {
-    return request.get<any, FlatResponse<{ conversations: Conversation[] }>>('/messages', { params })
+  getMessages(params: { from_stream_id?: string, limit?: number }) {
+    return request.get<any, FlatResponse<{ conversations: Conversation[], total_unread: number }>>('/messages', { params })
   },
-  getUnreadCount() {
-    return request.get<any, FlatResponse<{ unread_count: number }>>('/messages/unread')
+  updateLastSeenCursor(data: { last_seen_stream_id: string, conversation_type?: string, peer_id?: string }) {
+    return request.post<any, FlatResponse<{ cursor: string }>>('/messages/cursor', data)
+  },
+  markPrivateMessageAsRead(messageId: string) {
+    return request.post<any, FlatResponse<{}>>('/messages/read', { message_id: messageId })
+  },
+  pinConversation(conversationId: string) {
+    return request.post<any, FlatResponse<{}>>(`/conversations/${conversationId}/pin`)
+  },
+  unpinConversation(conversationId: string) {
+    return request.delete<any, FlatResponse<{}>>(`/conversations/${conversationId}/pin`)
+  },
+  deleteConversation(conversationId: string) {
+    return request.delete<any, FlatResponse<{}>>(`/conversations/${conversationId}`)
   }
 }
 
@@ -55,6 +67,21 @@ export const groupApi = {
   },
   joinGroup(groupId: string, message: string) {
     return request.post<any, FlatResponse<{}>>('/groups/join-requests', { group_id: groupId, message })
+  },
+  getGroupJoinRequests(groupId: string, params?: { status?: number, limit?: number, offset?: number }) {
+    return request.get<any, FlatResponse<{ requests: any[], total: number }>>(`/groups/${groupId}/join-requests`, { params })
+  },
+  getMyGroupJoinRequests(params?: { status?: number, limit?: number, offset?: number }) {
+    return request.get<any, FlatResponse<{ requests: any[], total: number }>>('/groups/join-requests/my', { params })
+  },
+  handleGroupJoinRequest(data: { request_id: string, action: 1 | 2 }) {
+    return request.post<any, FlatResponse<{}>>('/groups/join-requests/handle', data)
+  },
+  markGroupMessageAsRead(groupId: string, lastReadMessageId: string) {
+    return request.post<any, FlatResponse<{}>>(`/groups/${groupId}/read`, { last_read_message_id: lastReadMessageId })
+  },
+  searchGroups(keyword: string) {
+    return request.get<any, FlatResponse<{ groups: Group[], total: number }>>(`/search/groups`, { params: { keyword } })
   }
 }
 

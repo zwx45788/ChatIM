@@ -140,11 +140,13 @@ func main() {
 			// protected.PUT("/users/me", userHandler.UpdateCurrentUser)
 			protected.POST("/messages/send", userHandler.SendMessage)
 			protected.GET("/messages", userHandler.PullMessage)
-			protected.GET("/messages/unread", userHandler.GetUnreadCount)
-			protected.GET("/messages/unread/pull", userHandler.PullUnreadMessages)
-
-			// ========== 统一上线初始化接口 ==========
-			protected.GET("/unread/all", userHandler.PullAllUnreadMessages) // 📌 一次性拉取私聊+群聊未读
+			// protected.GET("/messages/unread", userHandler.GetUnreadCount) // 已弃用：未读数由前端计算
+			protected.POST("/messages/cursor", userHandler.UpdateLastSeenCursor) // 更新已读游标
+			// 标记消息为已读
+			protected.POST("/messages/read", userHandler.MarkPrivateMessageAsRead)
+			protected.POST("/groups/:group_id/read", userHandler.MarkGroupMessageAsRead)
+			// NOTE: `/messages/unread/pull` and `/unread/all` have been deprecated and removed from routes.
+			// 登录时请改为调用 `/messages` (PullMessage) 并结合 `/messages/unread` (GetUnreadCount)。
 
 			// ========== 群聊相关路由 ==========
 			protected.POST("/groups", userHandler.CreateGroup)
@@ -191,7 +193,15 @@ func main() {
 	}
 	r.GET("/ws", middleware.AuthMiddleware(), hub.HandleWebSocket)
 	logger.Info("API Gateway is running", zap.String("port", cfg.Server.APIPort))
-	if err := r.Run(cfg.Server.APIPort); err != nil {
-		logger.Fatal("Failed to run API Gateway", zap.Error(err))
+
+	if cfg.Server.CertFile != "" && cfg.Server.KeyFile != "" {
+		logger.Info("Starting API Gateway with TLS", zap.String("cert", cfg.Server.CertFile), zap.String("key", cfg.Server.KeyFile))
+		if err := r.RunTLS(cfg.Server.APIPort, cfg.Server.CertFile, cfg.Server.KeyFile); err != nil {
+			logger.Fatal("Failed to run API Gateway with TLS", zap.Error(err))
+		}
+	} else {
+		if err := r.Run(cfg.Server.APIPort); err != nil {
+			logger.Fatal("Failed to run API Gateway", zap.Error(err))
+		}
 	}
 }

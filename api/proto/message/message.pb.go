@@ -637,12 +637,13 @@ func (x *UnifiedMessage) GetStreamId() string {
 	return ""
 }
 
-// 拉取消息的请求（改为拉取按会话分组的未读消息）
+// 拉取消息的请求(改为拉取按会话分组的未读消息)
 type PullMessagesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Limit         int64                  `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`                                // 每个会话最多拉取的消息数（默认20）
-	AutoMark      bool                   `protobuf:"varint,2,opt,name=auto_mark,json=autoMark,proto3" json:"auto_mark,omitempty"`          // 是否自动标记为已读（默认false）
-	IncludeRead   bool                   `protobuf:"varint,3,opt,name=include_read,json=includeRead,proto3" json:"include_read,omitempty"` // 是否包含已读消息（默认false，只返回未读）
+	Limit         int64                  `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`                                    // 每个会话最多拉取的消息数(默认20)
+	AutoMark      bool                   `protobuf:"varint,2,opt,name=auto_mark,json=autoMark,proto3" json:"auto_mark,omitempty"`              // 是否自动标记为已读(默认false)
+	IncludeRead   bool                   `protobuf:"varint,3,opt,name=include_read,json=includeRead,proto3" json:"include_read,omitempty"`     // 是否包含已读消息(默认false,只返回未读)
+	FromStreamId  string                 `protobuf:"bytes,4,opt,name=from_stream_id,json=fromStreamId,proto3" json:"from_stream_id,omitempty"` // 从该 Stream ID 之后开始拉取(用于增量拉取)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -696,6 +697,13 @@ func (x *PullMessagesRequest) GetIncludeRead() bool {
 		return x.IncludeRead
 	}
 	return false
+}
+
+func (x *PullMessagesRequest) GetFromStreamId() string {
+	if x != nil {
+		return x.FromStreamId
+	}
+	return ""
 }
 
 // 拉取消息的响应（返回结构化的会话列表）
@@ -775,112 +783,6 @@ func (x *PullMessagesResponse) GetConversationCount() int32 {
 	return 0
 }
 
-// 标记消息已读的请求
-type MarkMessagesAsReadRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	MessageIds    []string               `protobuf:"bytes,1,rep,name=message_ids,json=messageIds,proto3" json:"message_ids,omitempty"` // 需要标记为已读的消息ID列表
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *MarkMessagesAsReadRequest) Reset() {
-	*x = MarkMessagesAsReadRequest{}
-	mi := &file_message_proto_msgTypes[10]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *MarkMessagesAsReadRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*MarkMessagesAsReadRequest) ProtoMessage() {}
-
-func (x *MarkMessagesAsReadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_message_proto_msgTypes[10]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use MarkMessagesAsReadRequest.ProtoReflect.Descriptor instead.
-func (*MarkMessagesAsReadRequest) Descriptor() ([]byte, []int) {
-	return file_message_proto_rawDescGZIP(), []int{10}
-}
-
-func (x *MarkMessagesAsReadRequest) GetMessageIds() []string {
-	if x != nil {
-		return x.MessageIds
-	}
-	return nil
-}
-
-// 标记消息已读的响应
-type MarkMessagesAsReadResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          int32                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	MarkedCount   int32                  `protobuf:"varint,3,opt,name=marked_count,json=markedCount,proto3" json:"marked_count,omitempty"` // 成功标记的消息数量
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *MarkMessagesAsReadResponse) Reset() {
-	*x = MarkMessagesAsReadResponse{}
-	mi := &file_message_proto_msgTypes[11]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *MarkMessagesAsReadResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*MarkMessagesAsReadResponse) ProtoMessage() {}
-
-func (x *MarkMessagesAsReadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_message_proto_msgTypes[11]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use MarkMessagesAsReadResponse.ProtoReflect.Descriptor instead.
-func (*MarkMessagesAsReadResponse) Descriptor() ([]byte, []int) {
-	return file_message_proto_rawDescGZIP(), []int{11}
-}
-
-func (x *MarkMessagesAsReadResponse) GetCode() int32 {
-	if x != nil {
-		return x.Code
-	}
-	return 0
-}
-
-func (x *MarkMessagesAsReadResponse) GetMessage() string {
-	if x != nil {
-		return x.Message
-	}
-	return ""
-}
-
-func (x *MarkMessagesAsReadResponse) GetMarkedCount() int32 {
-	if x != nil {
-		return x.MarkedCount
-	}
-	return 0
-}
-
 // 获取未读消息数的请求
 type GetUnreadCountRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -890,7 +792,7 @@ type GetUnreadCountRequest struct {
 
 func (x *GetUnreadCountRequest) Reset() {
 	*x = GetUnreadCountRequest{}
-	mi := &file_message_proto_msgTypes[12]
+	mi := &file_message_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -902,7 +804,7 @@ func (x *GetUnreadCountRequest) String() string {
 func (*GetUnreadCountRequest) ProtoMessage() {}
 
 func (x *GetUnreadCountRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_message_proto_msgTypes[12]
+	mi := &file_message_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -915,7 +817,7 @@ func (x *GetUnreadCountRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetUnreadCountRequest.ProtoReflect.Descriptor instead.
 func (*GetUnreadCountRequest) Descriptor() ([]byte, []int) {
-	return file_message_proto_rawDescGZIP(), []int{12}
+	return file_message_proto_rawDescGZIP(), []int{10}
 }
 
 // 获取未读消息数的响应
@@ -930,7 +832,7 @@ type GetUnreadCountResponse struct {
 
 func (x *GetUnreadCountResponse) Reset() {
 	*x = GetUnreadCountResponse{}
-	mi := &file_message_proto_msgTypes[13]
+	mi := &file_message_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -942,7 +844,7 @@ func (x *GetUnreadCountResponse) String() string {
 func (*GetUnreadCountResponse) ProtoMessage() {}
 
 func (x *GetUnreadCountResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_message_proto_msgTypes[13]
+	mi := &file_message_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -955,7 +857,7 @@ func (x *GetUnreadCountResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetUnreadCountResponse.ProtoReflect.Descriptor instead.
 func (*GetUnreadCountResponse) Descriptor() ([]byte, []int) {
-	return file_message_proto_rawDescGZIP(), []int{13}
+	return file_message_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *GetUnreadCountResponse) GetCode() int32 {
@@ -990,7 +892,7 @@ type PullUnreadMessagesRequest struct {
 
 func (x *PullUnreadMessagesRequest) Reset() {
 	*x = PullUnreadMessagesRequest{}
-	mi := &file_message_proto_msgTypes[14]
+	mi := &file_message_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1002,7 +904,7 @@ func (x *PullUnreadMessagesRequest) String() string {
 func (*PullUnreadMessagesRequest) ProtoMessage() {}
 
 func (x *PullUnreadMessagesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_message_proto_msgTypes[14]
+	mi := &file_message_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1015,7 +917,7 @@ func (x *PullUnreadMessagesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullUnreadMessagesRequest.ProtoReflect.Descriptor instead.
 func (*PullUnreadMessagesRequest) Descriptor() ([]byte, []int) {
-	return file_message_proto_rawDescGZIP(), []int{14}
+	return file_message_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *PullUnreadMessagesRequest) GetLimit() int64 {
@@ -1046,7 +948,7 @@ type PullUnreadMessagesResponse struct {
 
 func (x *PullUnreadMessagesResponse) Reset() {
 	*x = PullUnreadMessagesResponse{}
-	mi := &file_message_proto_msgTypes[15]
+	mi := &file_message_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1058,7 +960,7 @@ func (x *PullUnreadMessagesResponse) String() string {
 func (*PullUnreadMessagesResponse) ProtoMessage() {}
 
 func (x *PullUnreadMessagesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_message_proto_msgTypes[15]
+	mi := &file_message_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1071,7 +973,7 @@ func (x *PullUnreadMessagesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullUnreadMessagesResponse.ProtoReflect.Descriptor instead.
 func (*PullUnreadMessagesResponse) Descriptor() ([]byte, []int) {
-	return file_message_proto_rawDescGZIP(), []int{15}
+	return file_message_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *PullUnreadMessagesResponse) GetCode() int32 {
@@ -1118,7 +1020,7 @@ type PullAllUnreadOnLoginRequest struct {
 
 func (x *PullAllUnreadOnLoginRequest) Reset() {
 	*x = PullAllUnreadOnLoginRequest{}
-	mi := &file_message_proto_msgTypes[16]
+	mi := &file_message_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1130,7 +1032,7 @@ func (x *PullAllUnreadOnLoginRequest) String() string {
 func (*PullAllUnreadOnLoginRequest) ProtoMessage() {}
 
 func (x *PullAllUnreadOnLoginRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_message_proto_msgTypes[16]
+	mi := &file_message_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1143,7 +1045,7 @@ func (x *PullAllUnreadOnLoginRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullAllUnreadOnLoginRequest.ProtoReflect.Descriptor instead.
 func (*PullAllUnreadOnLoginRequest) Descriptor() ([]byte, []int) {
-	return file_message_proto_rawDescGZIP(), []int{16}
+	return file_message_proto_rawDescGZIP(), []int{14}
 }
 
 // 群聊未读消息详情
@@ -1158,7 +1060,7 @@ type GroupUnreadInfo struct {
 
 func (x *GroupUnreadInfo) Reset() {
 	*x = GroupUnreadInfo{}
-	mi := &file_message_proto_msgTypes[17]
+	mi := &file_message_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1170,7 +1072,7 @@ func (x *GroupUnreadInfo) String() string {
 func (*GroupUnreadInfo) ProtoMessage() {}
 
 func (x *GroupUnreadInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_message_proto_msgTypes[17]
+	mi := &file_message_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1183,7 +1085,7 @@ func (x *GroupUnreadInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GroupUnreadInfo.ProtoReflect.Descriptor instead.
 func (*GroupUnreadInfo) Descriptor() ([]byte, []int) {
-	return file_message_proto_rawDescGZIP(), []int{17}
+	return file_message_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *GroupUnreadInfo) GetGroupId() string {
@@ -1224,7 +1126,7 @@ type PullAllUnreadOnLoginResponse struct {
 
 func (x *PullAllUnreadOnLoginResponse) Reset() {
 	*x = PullAllUnreadOnLoginResponse{}
-	mi := &file_message_proto_msgTypes[18]
+	mi := &file_message_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1236,7 +1138,7 @@ func (x *PullAllUnreadOnLoginResponse) String() string {
 func (*PullAllUnreadOnLoginResponse) ProtoMessage() {}
 
 func (x *PullAllUnreadOnLoginResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_message_proto_msgTypes[18]
+	mi := &file_message_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1249,7 +1151,7 @@ func (x *PullAllUnreadOnLoginResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullAllUnreadOnLoginResponse.ProtoReflect.Descriptor instead.
 func (*PullAllUnreadOnLoginResponse) Descriptor() ([]byte, []int) {
-	return file_message_proto_rawDescGZIP(), []int{18}
+	return file_message_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *PullAllUnreadOnLoginResponse) GetCode() int32 {
@@ -1318,7 +1220,7 @@ type MarkPrivateMessageAsReadRequest struct {
 
 func (x *MarkPrivateMessageAsReadRequest) Reset() {
 	*x = MarkPrivateMessageAsReadRequest{}
-	mi := &file_message_proto_msgTypes[19]
+	mi := &file_message_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1330,7 +1232,7 @@ func (x *MarkPrivateMessageAsReadRequest) String() string {
 func (*MarkPrivateMessageAsReadRequest) ProtoMessage() {}
 
 func (x *MarkPrivateMessageAsReadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_message_proto_msgTypes[19]
+	mi := &file_message_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1343,7 +1245,7 @@ func (x *MarkPrivateMessageAsReadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MarkPrivateMessageAsReadRequest.ProtoReflect.Descriptor instead.
 func (*MarkPrivateMessageAsReadRequest) Descriptor() ([]byte, []int) {
-	return file_message_proto_rawDescGZIP(), []int{19}
+	return file_message_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *MarkPrivateMessageAsReadRequest) GetMessageId() string {
@@ -1364,7 +1266,7 @@ type MarkPrivateMessageAsReadResponse struct {
 
 func (x *MarkPrivateMessageAsReadResponse) Reset() {
 	*x = MarkPrivateMessageAsReadResponse{}
-	mi := &file_message_proto_msgTypes[20]
+	mi := &file_message_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1376,7 +1278,7 @@ func (x *MarkPrivateMessageAsReadResponse) String() string {
 func (*MarkPrivateMessageAsReadResponse) ProtoMessage() {}
 
 func (x *MarkPrivateMessageAsReadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_message_proto_msgTypes[20]
+	mi := &file_message_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1389,7 +1291,7 @@ func (x *MarkPrivateMessageAsReadResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MarkPrivateMessageAsReadResponse.ProtoReflect.Descriptor instead.
 func (*MarkPrivateMessageAsReadResponse) Descriptor() ([]byte, []int) {
-	return file_message_proto_rawDescGZIP(), []int{20}
+	return file_message_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *MarkPrivateMessageAsReadResponse) GetCode() int32 {
@@ -1417,7 +1319,7 @@ type MarkGroupMessageAsReadRequest struct {
 
 func (x *MarkGroupMessageAsReadRequest) Reset() {
 	*x = MarkGroupMessageAsReadRequest{}
-	mi := &file_message_proto_msgTypes[21]
+	mi := &file_message_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1429,7 +1331,7 @@ func (x *MarkGroupMessageAsReadRequest) String() string {
 func (*MarkGroupMessageAsReadRequest) ProtoMessage() {}
 
 func (x *MarkGroupMessageAsReadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_message_proto_msgTypes[21]
+	mi := &file_message_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1442,7 +1344,7 @@ func (x *MarkGroupMessageAsReadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MarkGroupMessageAsReadRequest.ProtoReflect.Descriptor instead.
 func (*MarkGroupMessageAsReadRequest) Descriptor() ([]byte, []int) {
-	return file_message_proto_rawDescGZIP(), []int{21}
+	return file_message_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *MarkGroupMessageAsReadRequest) GetGroupId() string {
@@ -1470,7 +1372,7 @@ type MarkGroupMessageAsReadResponse struct {
 
 func (x *MarkGroupMessageAsReadResponse) Reset() {
 	*x = MarkGroupMessageAsReadResponse{}
-	mi := &file_message_proto_msgTypes[22]
+	mi := &file_message_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1482,7 +1384,7 @@ func (x *MarkGroupMessageAsReadResponse) String() string {
 func (*MarkGroupMessageAsReadResponse) ProtoMessage() {}
 
 func (x *MarkGroupMessageAsReadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_message_proto_msgTypes[22]
+	mi := &file_message_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1495,7 +1397,7 @@ func (x *MarkGroupMessageAsReadResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MarkGroupMessageAsReadResponse.ProtoReflect.Descriptor instead.
 func (*MarkGroupMessageAsReadResponse) Descriptor() ([]byte, []int) {
-	return file_message_proto_rawDescGZIP(), []int{22}
+	return file_message_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *MarkGroupMessageAsReadResponse) GetCode() int32 {
@@ -1524,7 +1426,7 @@ type PullGroupMessagesRequest struct {
 
 func (x *PullGroupMessagesRequest) Reset() {
 	*x = PullGroupMessagesRequest{}
-	mi := &file_message_proto_msgTypes[23]
+	mi := &file_message_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1536,7 +1438,7 @@ func (x *PullGroupMessagesRequest) String() string {
 func (*PullGroupMessagesRequest) ProtoMessage() {}
 
 func (x *PullGroupMessagesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_message_proto_msgTypes[23]
+	mi := &file_message_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1549,7 +1451,7 @@ func (x *PullGroupMessagesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullGroupMessagesRequest.ProtoReflect.Descriptor instead.
 func (*PullGroupMessagesRequest) Descriptor() ([]byte, []int) {
-	return file_message_proto_rawDescGZIP(), []int{23}
+	return file_message_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *PullGroupMessagesRequest) GetGroupId() string {
@@ -1587,7 +1489,7 @@ type PullGroupMessagesResponse struct {
 
 func (x *PullGroupMessagesResponse) Reset() {
 	*x = PullGroupMessagesResponse{}
-	mi := &file_message_proto_msgTypes[24]
+	mi := &file_message_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1599,7 +1501,7 @@ func (x *PullGroupMessagesResponse) String() string {
 func (*PullGroupMessagesResponse) ProtoMessage() {}
 
 func (x *PullGroupMessagesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_message_proto_msgTypes[24]
+	mi := &file_message_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1612,7 +1514,7 @@ func (x *PullGroupMessagesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullGroupMessagesResponse.ProtoReflect.Descriptor instead.
 func (*PullGroupMessagesResponse) Descriptor() ([]byte, []int) {
-	return file_message_proto_rawDescGZIP(), []int{24}
+	return file_message_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *PullGroupMessagesResponse) GetCode() int32 {
@@ -1648,6 +1550,128 @@ func (x *PullGroupMessagesResponse) GetHasMore() bool {
 		return x.HasMore
 	}
 	return false
+}
+
+// 更新已读游标请求
+type UpdateLastSeenCursorRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	ConversationType string                 `protobuf:"bytes,1,opt,name=conversation_type,json=conversationType,proto3" json:"conversation_type,omitempty"`     // "private" 或 "group"
+	PeerId           string                 `protobuf:"bytes,2,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`                                   // 对方用户ID或群组ID
+	LastSeenStreamId string                 `protobuf:"bytes,3,opt,name=last_seen_stream_id,json=lastSeenStreamId,proto3" json:"last_seen_stream_id,omitempty"` // 最后已读的 Stream ID
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *UpdateLastSeenCursorRequest) Reset() {
+	*x = UpdateLastSeenCursorRequest{}
+	mi := &file_message_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateLastSeenCursorRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateLastSeenCursorRequest) ProtoMessage() {}
+
+func (x *UpdateLastSeenCursorRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_message_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateLastSeenCursorRequest.ProtoReflect.Descriptor instead.
+func (*UpdateLastSeenCursorRequest) Descriptor() ([]byte, []int) {
+	return file_message_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *UpdateLastSeenCursorRequest) GetConversationType() string {
+	if x != nil {
+		return x.ConversationType
+	}
+	return ""
+}
+
+func (x *UpdateLastSeenCursorRequest) GetPeerId() string {
+	if x != nil {
+		return x.PeerId
+	}
+	return ""
+}
+
+func (x *UpdateLastSeenCursorRequest) GetLastSeenStreamId() string {
+	if x != nil {
+		return x.LastSeenStreamId
+	}
+	return ""
+}
+
+// 更新已读游标响应
+type UpdateLastSeenCursorResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int32                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Cursor        string                 `protobuf:"bytes,3,opt,name=cursor,proto3" json:"cursor,omitempty"` // 更新后的游标值
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateLastSeenCursorResponse) Reset() {
+	*x = UpdateLastSeenCursorResponse{}
+	mi := &file_message_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateLastSeenCursorResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateLastSeenCursorResponse) ProtoMessage() {}
+
+func (x *UpdateLastSeenCursorResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_message_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateLastSeenCursorResponse.ProtoReflect.Descriptor instead.
+func (*UpdateLastSeenCursorResponse) Descriptor() ([]byte, []int) {
+	return file_message_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *UpdateLastSeenCursorResponse) GetCode() int32 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *UpdateLastSeenCursorResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *UpdateLastSeenCursorResponse) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
 }
 
 var File_message_proto protoreflect.FileDescriptor
@@ -1713,24 +1737,18 @@ const file_message_proto_rawDesc = "" +
 	"created_at\x18\b \x01(\x03R\tcreatedAt\x12\x17\n" +
 	"\ais_read\x18\t \x01(\bR\x06isRead\x12\x1b\n" +
 	"\tstream_id\x18\n" +
-	" \x01(\tR\bstreamId\"k\n" +
+	" \x01(\tR\bstreamId\"\x91\x01\n" +
 	"\x13PullMessagesRequest\x12\x14\n" +
 	"\x05limit\x18\x01 \x01(\x03R\x05limit\x12\x1b\n" +
 	"\tauto_mark\x18\x02 \x01(\bR\bautoMark\x12!\n" +
-	"\finclude_read\x18\x03 \x01(\bR\vincludeRead\"\xe1\x01\n" +
+	"\finclude_read\x18\x03 \x01(\bR\vincludeRead\x12$\n" +
+	"\x0efrom_stream_id\x18\x04 \x01(\tR\ffromStreamId\"\xe1\x01\n" +
 	"\x14PullMessagesResponse\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12I\n" +
 	"\rconversations\x18\x03 \x03(\v2#.proto.message.ConversationMessagesR\rconversations\x12!\n" +
 	"\ftotal_unread\x18\x04 \x01(\x05R\vtotalUnread\x12-\n" +
-	"\x12conversation_count\x18\x05 \x01(\x05R\x11conversationCount\"<\n" +
-	"\x19MarkMessagesAsReadRequest\x12\x1f\n" +
-	"\vmessage_ids\x18\x01 \x03(\tR\n" +
-	"messageIds\"m\n" +
-	"\x1aMarkMessagesAsReadResponse\x12\x12\n" +
-	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\x12!\n" +
-	"\fmarked_count\x18\x03 \x01(\x05R\vmarkedCount\"\x17\n" +
+	"\x12conversation_count\x18\x05 \x01(\x05R\x11conversationCount\"\x17\n" +
 	"\x15GetUnreadCountRequest\"i\n" +
 	"\x16GetUnreadCountResponse\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
@@ -1783,13 +1801,21 @@ const file_message_proto_rawDesc = "" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x127\n" +
 	"\bmessages\x18\x03 \x03(\v2\x1b.proto.message.GroupMessageR\bmessages\x12\x14\n" +
 	"\x05total\x18\x04 \x01(\x05R\x05total\x12\x19\n" +
-	"\bhas_more\x18\x05 \x01(\bR\ahasMore2\xa6\b\n" +
+	"\bhas_more\x18\x05 \x01(\bR\ahasMore\"\x92\x01\n" +
+	"\x1bUpdateLastSeenCursorRequest\x12+\n" +
+	"\x11conversation_type\x18\x01 \x01(\tR\x10conversationType\x12\x17\n" +
+	"\apeer_id\x18\x02 \x01(\tR\x06peerId\x12-\n" +
+	"\x13last_seen_stream_id\x18\x03 \x01(\tR\x10lastSeenStreamId\"d\n" +
+	"\x1cUpdateLastSeenCursorResponse\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x16\n" +
+	"\x06cursor\x18\x03 \x01(\tR\x06cursor2\xac\b\n" +
 	"\x0eMessageService\x12T\n" +
 	"\vSendMessage\x12!.proto.message.SendMessageRequest\x1a\".proto.message.SendMessageResponse\x12c\n" +
 	"\x10SendGroupMessage\x12&.proto.message.SendGroupMessageRequest\x1a'.proto.message.SendGroupMessageResponse\x12W\n" +
-	"\fPullMessages\x12\".proto.message.PullMessagesRequest\x1a#.proto.message.PullMessagesResponse\x12i\n" +
-	"\x12MarkMessagesAsRead\x12(.proto.message.MarkMessagesAsReadRequest\x1a).proto.message.MarkMessagesAsReadResponse\x12]\n" +
-	"\x0eGetUnreadCount\x12$.proto.message.GetUnreadCountRequest\x1a%.proto.message.GetUnreadCountResponse\x12i\n" +
+	"\fPullMessages\x12\".proto.message.PullMessagesRequest\x1a#.proto.message.PullMessagesResponse\x12]\n" +
+	"\x0eGetUnreadCount\x12$.proto.message.GetUnreadCountRequest\x1a%.proto.message.GetUnreadCountResponse\x12o\n" +
+	"\x14UpdateLastSeenCursor\x12*.proto.message.UpdateLastSeenCursorRequest\x1a+.proto.message.UpdateLastSeenCursorResponse\x12i\n" +
 	"\x12PullUnreadMessages\x12(.proto.message.PullUnreadMessagesRequest\x1a).proto.message.PullUnreadMessagesResponse\x12o\n" +
 	"\x14PullAllUnreadOnLogin\x12*.proto.message.PullAllUnreadOnLoginRequest\x1a+.proto.message.PullAllUnreadOnLoginResponse\x12{\n" +
 	"\x18MarkPrivateMessageAsRead\x12..proto.message.MarkPrivateMessageAsReadRequest\x1a/.proto.message.MarkPrivateMessageAsReadResponse\x12u\n" +
@@ -1820,21 +1846,21 @@ var file_message_proto_goTypes = []any{
 	(*UnifiedMessage)(nil),                   // 7: proto.message.UnifiedMessage
 	(*PullMessagesRequest)(nil),              // 8: proto.message.PullMessagesRequest
 	(*PullMessagesResponse)(nil),             // 9: proto.message.PullMessagesResponse
-	(*MarkMessagesAsReadRequest)(nil),        // 10: proto.message.MarkMessagesAsReadRequest
-	(*MarkMessagesAsReadResponse)(nil),       // 11: proto.message.MarkMessagesAsReadResponse
-	(*GetUnreadCountRequest)(nil),            // 12: proto.message.GetUnreadCountRequest
-	(*GetUnreadCountResponse)(nil),           // 13: proto.message.GetUnreadCountResponse
-	(*PullUnreadMessagesRequest)(nil),        // 14: proto.message.PullUnreadMessagesRequest
-	(*PullUnreadMessagesResponse)(nil),       // 15: proto.message.PullUnreadMessagesResponse
-	(*PullAllUnreadOnLoginRequest)(nil),      // 16: proto.message.PullAllUnreadOnLoginRequest
-	(*GroupUnreadInfo)(nil),                  // 17: proto.message.GroupUnreadInfo
-	(*PullAllUnreadOnLoginResponse)(nil),     // 18: proto.message.PullAllUnreadOnLoginResponse
-	(*MarkPrivateMessageAsReadRequest)(nil),  // 19: proto.message.MarkPrivateMessageAsReadRequest
-	(*MarkPrivateMessageAsReadResponse)(nil), // 20: proto.message.MarkPrivateMessageAsReadResponse
-	(*MarkGroupMessageAsReadRequest)(nil),    // 21: proto.message.MarkGroupMessageAsReadRequest
-	(*MarkGroupMessageAsReadResponse)(nil),   // 22: proto.message.MarkGroupMessageAsReadResponse
-	(*PullGroupMessagesRequest)(nil),         // 23: proto.message.PullGroupMessagesRequest
-	(*PullGroupMessagesResponse)(nil),        // 24: proto.message.PullGroupMessagesResponse
+	(*GetUnreadCountRequest)(nil),            // 10: proto.message.GetUnreadCountRequest
+	(*GetUnreadCountResponse)(nil),           // 11: proto.message.GetUnreadCountResponse
+	(*PullUnreadMessagesRequest)(nil),        // 12: proto.message.PullUnreadMessagesRequest
+	(*PullUnreadMessagesResponse)(nil),       // 13: proto.message.PullUnreadMessagesResponse
+	(*PullAllUnreadOnLoginRequest)(nil),      // 14: proto.message.PullAllUnreadOnLoginRequest
+	(*GroupUnreadInfo)(nil),                  // 15: proto.message.GroupUnreadInfo
+	(*PullAllUnreadOnLoginResponse)(nil),     // 16: proto.message.PullAllUnreadOnLoginResponse
+	(*MarkPrivateMessageAsReadRequest)(nil),  // 17: proto.message.MarkPrivateMessageAsReadRequest
+	(*MarkPrivateMessageAsReadResponse)(nil), // 18: proto.message.MarkPrivateMessageAsReadResponse
+	(*MarkGroupMessageAsReadRequest)(nil),    // 19: proto.message.MarkGroupMessageAsReadRequest
+	(*MarkGroupMessageAsReadResponse)(nil),   // 20: proto.message.MarkGroupMessageAsReadResponse
+	(*PullGroupMessagesRequest)(nil),         // 21: proto.message.PullGroupMessagesRequest
+	(*PullGroupMessagesResponse)(nil),        // 22: proto.message.PullGroupMessagesResponse
+	(*UpdateLastSeenCursorRequest)(nil),      // 23: proto.message.UpdateLastSeenCursorRequest
+	(*UpdateLastSeenCursorResponse)(nil),     // 24: proto.message.UpdateLastSeenCursorResponse
 	nil,                                      // 25: proto.message.PullAllUnreadOnLoginResponse.GroupMessagesEntry
 }
 var file_message_proto_depIdxs = []int32{
@@ -1847,27 +1873,27 @@ var file_message_proto_depIdxs = []int32{
 	0,  // 6: proto.message.PullAllUnreadOnLoginResponse.private_messages:type_name -> proto.message.Message
 	25, // 7: proto.message.PullAllUnreadOnLoginResponse.group_messages:type_name -> proto.message.PullAllUnreadOnLoginResponse.GroupMessagesEntry
 	1,  // 8: proto.message.PullGroupMessagesResponse.messages:type_name -> proto.message.GroupMessage
-	17, // 9: proto.message.PullAllUnreadOnLoginResponse.GroupMessagesEntry.value:type_name -> proto.message.GroupUnreadInfo
+	15, // 9: proto.message.PullAllUnreadOnLoginResponse.GroupMessagesEntry.value:type_name -> proto.message.GroupUnreadInfo
 	2,  // 10: proto.message.MessageService.SendMessage:input_type -> proto.message.SendMessageRequest
 	4,  // 11: proto.message.MessageService.SendGroupMessage:input_type -> proto.message.SendGroupMessageRequest
 	8,  // 12: proto.message.MessageService.PullMessages:input_type -> proto.message.PullMessagesRequest
-	10, // 13: proto.message.MessageService.MarkMessagesAsRead:input_type -> proto.message.MarkMessagesAsReadRequest
-	12, // 14: proto.message.MessageService.GetUnreadCount:input_type -> proto.message.GetUnreadCountRequest
-	14, // 15: proto.message.MessageService.PullUnreadMessages:input_type -> proto.message.PullUnreadMessagesRequest
-	16, // 16: proto.message.MessageService.PullAllUnreadOnLogin:input_type -> proto.message.PullAllUnreadOnLoginRequest
-	19, // 17: proto.message.MessageService.MarkPrivateMessageAsRead:input_type -> proto.message.MarkPrivateMessageAsReadRequest
-	21, // 18: proto.message.MessageService.MarkGroupMessageAsRead:input_type -> proto.message.MarkGroupMessageAsReadRequest
-	23, // 19: proto.message.MessageService.PullGroupMessages:input_type -> proto.message.PullGroupMessagesRequest
+	10, // 13: proto.message.MessageService.GetUnreadCount:input_type -> proto.message.GetUnreadCountRequest
+	23, // 14: proto.message.MessageService.UpdateLastSeenCursor:input_type -> proto.message.UpdateLastSeenCursorRequest
+	12, // 15: proto.message.MessageService.PullUnreadMessages:input_type -> proto.message.PullUnreadMessagesRequest
+	14, // 16: proto.message.MessageService.PullAllUnreadOnLogin:input_type -> proto.message.PullAllUnreadOnLoginRequest
+	17, // 17: proto.message.MessageService.MarkPrivateMessageAsRead:input_type -> proto.message.MarkPrivateMessageAsReadRequest
+	19, // 18: proto.message.MessageService.MarkGroupMessageAsRead:input_type -> proto.message.MarkGroupMessageAsReadRequest
+	21, // 19: proto.message.MessageService.PullGroupMessages:input_type -> proto.message.PullGroupMessagesRequest
 	3,  // 20: proto.message.MessageService.SendMessage:output_type -> proto.message.SendMessageResponse
 	5,  // 21: proto.message.MessageService.SendGroupMessage:output_type -> proto.message.SendGroupMessageResponse
 	9,  // 22: proto.message.MessageService.PullMessages:output_type -> proto.message.PullMessagesResponse
-	11, // 23: proto.message.MessageService.MarkMessagesAsRead:output_type -> proto.message.MarkMessagesAsReadResponse
-	13, // 24: proto.message.MessageService.GetUnreadCount:output_type -> proto.message.GetUnreadCountResponse
-	15, // 25: proto.message.MessageService.PullUnreadMessages:output_type -> proto.message.PullUnreadMessagesResponse
-	18, // 26: proto.message.MessageService.PullAllUnreadOnLogin:output_type -> proto.message.PullAllUnreadOnLoginResponse
-	20, // 27: proto.message.MessageService.MarkPrivateMessageAsRead:output_type -> proto.message.MarkPrivateMessageAsReadResponse
-	22, // 28: proto.message.MessageService.MarkGroupMessageAsRead:output_type -> proto.message.MarkGroupMessageAsReadResponse
-	24, // 29: proto.message.MessageService.PullGroupMessages:output_type -> proto.message.PullGroupMessagesResponse
+	11, // 23: proto.message.MessageService.GetUnreadCount:output_type -> proto.message.GetUnreadCountResponse
+	24, // 24: proto.message.MessageService.UpdateLastSeenCursor:output_type -> proto.message.UpdateLastSeenCursorResponse
+	13, // 25: proto.message.MessageService.PullUnreadMessages:output_type -> proto.message.PullUnreadMessagesResponse
+	16, // 26: proto.message.MessageService.PullAllUnreadOnLogin:output_type -> proto.message.PullAllUnreadOnLoginResponse
+	18, // 27: proto.message.MessageService.MarkPrivateMessageAsRead:output_type -> proto.message.MarkPrivateMessageAsReadResponse
+	20, // 28: proto.message.MessageService.MarkGroupMessageAsRead:output_type -> proto.message.MarkGroupMessageAsReadResponse
+	22, // 29: proto.message.MessageService.PullGroupMessages:output_type -> proto.message.PullGroupMessagesResponse
 	20, // [20:30] is the sub-list for method output_type
 	10, // [10:20] is the sub-list for method input_type
 	10, // [10:10] is the sub-list for extension type_name

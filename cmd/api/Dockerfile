@@ -20,6 +20,7 @@ WORKDIR /root/
 COPY --from=builder /app/api-gateway .
 COPY --from=builder /app/pkg/config/config.yaml ./config/config.yaml
 COPY --from=builder /app/web ./web
+COPY --from=builder /app/certs ./certs
 
 # 暴露 HTTP 端口
 EXPOSE 8080

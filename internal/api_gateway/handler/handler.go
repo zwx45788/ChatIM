@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 // withAuthMetadata attaches Authorization header into outgoing gRPC context.
@@ -258,83 +259,14 @@ func (h *UserGatewayHandler) Login(c *gin.Context) {
 		return
 	}
 
-	// 👇 新增：登录成功后，自动拉取未读消息
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "" {
-		// 创建新的Authorization header（使用新的token）
-		authHeader = "Bearer " + res.Token
-	}
-
-	md := metadata.New(map[string]string{"authorization": authHeader})
-	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
-
-	// 并发拉取私聊和群聊未读消息
-	type UnreadResult struct {
-		privateRes *msgPb.PullUnreadMessagesResponse
-		groupRes   *grpPb.PullAllGroupsUnreadMessagesResponse
-		err        error
-	}
-
-	resultChan := make(chan UnreadResult, 2)
-
-	// 拉取私聊未读
-	go func() {
-		res, err := h.messageClient.PullUnreadMessages(ctx, &msgPb.PullUnreadMessagesRequest{
-			Limit:    100,
-			AutoMark: false, // 只查看，不自动标记
-		})
-		resultChan <- UnreadResult{privateRes: res, err: err}
-	}()
-
-	// 拉取群聊未读
-	go func() {
-		res, err := h.groupClient.PullAllGroupsUnreadMessages(ctx, &grpPb.PullAllGroupsUnreadMessagesRequest{
-			Limit: 20,
-		})
-		resultChan <- UnreadResult{groupRes: res, err: err}
-	}()
-
-	// 等待两个结果
-	var privateResult, groupResult UnreadResult
-	for i := 0; i < 2; i++ {
-		result := <-resultChan
-		if result.privateRes != nil {
-			privateResult = result
-		} else {
-			groupResult = result
-		}
-	}
-
-	// 构建未读消息响应（失败时返回空而不是错误）
-	var privateUnreads interface{}
-	var privateUnreadCount int32
-	if privateResult.err == nil && privateResult.privateRes != nil {
-		privateUnreads = privateResult.privateRes.Msgs
-		privateUnreadCount = privateResult.privateRes.TotalUnread
-	}
-
-	var groupUnreads interface{}
-	var groupUnreadCount int32
-	if groupResult.err == nil && groupResult.groupRes != nil {
-		groupUnreads = groupResult.groupRes.GroupUnreads
-		groupUnreadCount = groupResult.groupRes.TotalUnreadCount
-	}
-
-	totalUnreadCount := privateUnreadCount + groupUnreadCount
-
-	// 返回token和未读消息
+	// 返回 token，前端在登录后主动调用 PullMessages
 	c.JSON(statusCode, gin.H{
-		"code":                 res.Code,
-		"message":              res.Message,
-		"token":                res.Token,
-		"private_unreads":      privateUnreads,
-		"private_unread_count": privateUnreadCount,
-		"group_unreads":        groupUnreads,
-		"group_unread_count":   groupUnreadCount,
-		"total_unread_count":   totalUnreadCount,
+		"code":    res.Code,
+		"message": res.Message,
+		"token":   res.Token,
 	})
 
-	log.Printf("User logged in successfully, total unread messages: %d", totalUnreadCount)
+	log.Printf("User logged in successfully")
 }
 func (h *UserGatewayHandler) GetCurrentUser(c *gin.Context) {
 	userID, exists := middleware.GetUserIDFromContext(c)
@@ -524,6 +456,112 @@ func (h *UserGatewayHandler) GetUnreadCount(c *gin.Context) {
 	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
 
 	res, err := h.messageClient.GetUnreadCount(ctx, &msgPb.GetUnreadCountRequest{})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+
+	c.JSON(statusCode, res)
+}
+
+// UpdateLastSeenCursor 更新用户已读游标
+func (h *UserGatewayHandler) UpdateLastSeenCursor(c *gin.Context) {
+	var req msgPb.UpdateLastSeenCursorRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+		return
+	}
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	res, err := h.messageClient.UpdateLastSeenCursor(ctx, &req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+
+	c.JSON(statusCode, res)
+}
+
+// MarkPrivateMessageAsRead 标记私聊消息为已读
+func (h *UserGatewayHandler) MarkPrivateMessageAsRead(c *gin.Context) {
+	var req msgPb.MarkPrivateMessageAsReadRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+		return
+	}
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	res, err := h.messageClient.MarkPrivateMessageAsRead(ctx, &req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	statusCode := http.StatusOK
+	if res.Code != 0 {
+		statusCode = http.StatusInternalServerError
+	}
+
+	c.JSON(statusCode, res)
+}
+
+// MarkGroupMessageAsRead 标记群聊消息为已读
+func (h *UserGatewayHandler) MarkGroupMessageAsRead(c *gin.Context) {
+	groupID := c.Param("group_id")
+	if groupID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "group_id is required in path"})
+		return
+	}
+
+	var body struct {
+		LastReadMessageId string `json:"last_read_message_id"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+		return
+	}
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+		return
+	}
+
+	md := metadata.New(map[string]string{"authorization": authHeader})
+	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
+
+	req := &msgPb.MarkGroupMessageAsReadRequest{
+		GroupId:           groupID,
+		LastReadMessageId: body.LastReadMessageId,
+	}
+
+	res, err := h.messageClient.MarkGroupMessageAsRead(ctx, req)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -944,13 +982,25 @@ func (h *UserGatewayHandler) SendGroupJoinRequest(c *gin.Context) {
 		Message: req.Message,
 	})
 	if err != nil {
+		st, ok := status.FromError(err)
+		if ok {
+			// 将 gRPC 错误转换为 200 OK 的 JSON 响应，以便前端 axios 不会抛出网络错误
+			// 前端会检查 code !== 0 来判断业务错误
+			c.JSON(http.StatusOK, gin.H{
+				"code":    st.Code(),
+				"message": st.Message(),
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	statusCode := http.StatusOK
 	if res.Code != 0 {
-		statusCode = http.StatusInternalServerError
+		// 如果业务逻辑返回非0 code (虽然通常 gRPC 成功时 code 为 0)
+		// 这里保持原样，或者也可以统一处理
+		statusCode = http.StatusOK // 保持 200，让前端处理 code
 	}
 	c.JSON(statusCode, res)
 }

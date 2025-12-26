@@ -3,8 +3,9 @@
     <div class="conversation-list">
       <div v-for="conv in chatStore.conversations" :key="conv.conversation_id" 
            class="conversation-item" 
-           :class="{ active: chatStore.currentConversation?.conversation_id === conv.conversation_id }"
-           @click="selectConversation(conv)">
+           :class="{ active: chatStore.currentConversation?.conversation_id === conv.conversation_id, pinned: conv.is_pinned }"
+           @click="selectConversation(conv)"
+           @contextmenu.prevent="showContextMenu($event, conv)">
         <el-avatar :size="40" :src="conv.peer_avatar">{{ conv.peer_name?.charAt(0) }}</el-avatar>
         <div class="conv-info">
           <div class="conv-top">
@@ -15,20 +16,31 @@
             <span class="conv-msg">{{ conv.last_message }}</span>
             <el-badge v-if="conv.unread_count > 0" :value="conv.unread_count" class="unread-badge" />
           </div>
+          <div v-if="conv.is_pinned" class="pinned-icon">📌</div>
         </div>
       </div>
     </div>
+
+    <!-- Context Menu -->
+    <div v-if="contextMenuVisible" class="context-menu" :style="{ top: contextMenuY + 'px', left: contextMenuX + 'px' }">
+      <div class="menu-item" @click="togglePin">{{ selectedConv?.is_pinned ? 'Unpin' : 'Pin' }}</div>
+      <div class="menu-item delete" @click="deleteConv">Delete</div>
+    </div>
+
     <div class="chat-area" v-if="chatStore.currentConversation">
       <div class="chat-header">
         {{ chatStore.currentConversation.peer_name || chatStore.currentConversation.title }}
       </div>
       <div class="message-list" ref="messageListRef">
-        <div v-for="msg in currentMessages" :key="msg.id" 
+        <div v-for="msg in currentMessages" :key="msg.stream_id || msg.id || (msg.created_at + '-' + msg.from_user_id)" 
              class="message-item" 
              :class="{ 'my-message': msg.from_user_id === userStore.currentUserId }">
           <el-avatar :size="30" class="msg-avatar">{{ msg.from_user_name?.charAt(0) || 'U' }}</el-avatar>
           <div class="msg-content">
             <div class="msg-sender" v-if="msg.type === 'group' && msg.from_user_id !== userStore.currentUserId">
+              {{ msg.from_user_name }}
+            </div>
+            <div class="msg-sender" v-else-if="msg.from_user_id !== userStore.currentUserId">
               {{ msg.from_user_name }}
             </div>
             <div class="msg-bubble">{{ msg.content }}</div>
@@ -60,10 +72,42 @@ const userStore = useUserStore()
 const inputMessage = ref('')
 const messageListRef = ref<HTMLElement | null>(null)
 
+// Context Menu State
+const contextMenuVisible = ref(false)
+const contextMenuX = ref(0)
+const contextMenuY = ref(0)
+const selectedConv = ref<Conversation | null>(null)
+
 onMounted(() => {
   chatStore.fetchConversations()
   chatStore.syncMessages()
+  document.addEventListener('click', closeContextMenu)
 })
+
+const showContextMenu = (event: MouseEvent, conv: Conversation) => {
+  selectedConv.value = conv
+  contextMenuX.value = event.clientX
+  contextMenuY.value = event.clientY
+  contextMenuVisible.value = true
+}
+
+const closeContextMenu = () => {
+  contextMenuVisible.value = false
+}
+
+const togglePin = async () => {
+  if (!selectedConv.value) return
+  await chatStore.pinConversation(selectedConv.value.conversation_id, !selectedConv.value.is_pinned)
+  closeContextMenu()
+}
+
+const deleteConv = async () => {
+  if (!selectedConv.value) return
+  if (confirm('Are you sure you want to delete this conversation?')) {
+    await chatStore.deleteConversation(selectedConv.value.conversation_id)
+  }
+  closeContextMenu()
+}
 
 const currentMessages = computed(() => {
   if (!chatStore.currentConversation) return []
@@ -72,7 +116,15 @@ const currentMessages = computed(() => {
 
 const selectConversation = async (conv: Conversation) => {
   chatStore.currentConversation = conv
-  conv.unread_count = 0 // Reset unread locally
+  
+  // Clear unread count and persist to conversation list
+  const targetConv = chatStore.conversations.find(c => c.conversation_id === conv.conversation_id)
+  if (targetConv) {
+    targetConv.unread_count = 0
+  }
+  
+  // Recalculate total unread count
+  chatStore.unreadCount = chatStore.conversations.reduce((sum, c) => sum + (c.unread_count || 0), 0)
   
   // Fetch messages if not loaded
   if (!chatStore.messages[conv.conversation_id]) {
@@ -117,7 +169,10 @@ const sendMessage = async () => {
     }
     
     if (res && res.msg) {
-      chatStore.handleNewMessage(res.msg)
+      // 前端仍做回显，但依赖去重逻辑避免后续同步/拉取产生重复
+      const msg: any = res.msg
+      msg.type = chatStore.currentConversation.type
+      await chatStore.handleNewMessage(msg)
     }
   } catch (e) {
     console.error(e)
@@ -160,6 +215,41 @@ const formatTime = (timestamp: number | string) => {
   gap: 10px;
   cursor: pointer;
   border-bottom: 1px solid #f0f0f0;
+  position: relative;
+}
+.conversation-item.pinned {
+  background-color: #f0f9eb;
+}
+.pinned-icon {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  font-size: 12px;
+}
+.context-menu {
+  position: fixed;
+  background: white;
+  border: 1px solid #dcdfe6;
+  box-shadow: 0 2px 12px 0 rgba(0,0,0,0.1);
+  border-radius: 4px;
+  z-index: 2000;
+  min-width: 100px;
+}
+.menu-item {
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #606266;
+}
+.menu-item:hover {
+  background-color: #ecf5ff;
+  color: #409eff;
+}
+.menu-item.delete {
+  color: #f56c6c;
+}
+.menu-item.delete:hover {
+  background-color: #fef0f0;
 }
 .conversation-item:hover, .conversation-item.active {
   background-color: #f5f7fa;

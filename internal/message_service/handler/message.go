@@ -63,11 +63,12 @@ func (h *MessageHandler) SendMessage(ctx context.Context, req *pb.SendMessageReq
 	h.streamOp.UpdateConversationTime(ctx, fromUserID, fmt.Sprintf("private:%s", fromUserID))
 	h.streamOp.UpdateConversationTime(ctx, req.ToUserId, conversationID)
 
-	// 3. 发布消息通知到 Redis（通知 WebSocket 推送）
+	// 3. 发布消息通知到 Redis（通知 WebSocket 推送，包括发送者自己用于多设备同步）
 	go func() {
 		notificationCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
+		// 给接收者发送通知
 		notification := map[string]interface{}{
 			"msg_id":       msgID,
 			"to_user_id":   req.ToUserId,
@@ -91,6 +92,22 @@ func (h *MessageHandler) SendMessage(ctx context.Context, req *pb.SendMessageReq
 				zap.String("msg_id", msgID),
 				zap.String("to_user_id", req.ToUserId))
 		}
+
+		// 也给发送者发送通知（用于多设备同步/消息回显）
+		// senderNotification := map[string]interface{}{
+		// 	"msg_id":       msgID,
+		// 	"to_user_id":   fromUserID,
+		// 	"from_user_id": fromUserID,
+		// 	"type":         "private",
+		// 	"content":      req.Content,
+		// 	"created_at":   time.Now().Unix(),
+		// 	"is_sender":    true, // 标记这是发送者自己的消息
+		// }
+
+		// senderNotificationJSON, err := json.Marshal(senderNotification)
+		// if err == nil {
+		// 	h.rdb.Publish(notificationCtx, "message_notifications", senderNotificationJSON).Err()
+		// }
 	}()
 
 	// 4. 异步写入数据库（不阻塞用户）
@@ -163,17 +180,16 @@ func (h *MessageHandler) SendGroupMessage(ctx context.Context, req *pb.SendGroup
 		h.streamOp.UpdateConversationTime(ctx, memberID, conversationID)
 	}
 
-	// 4. 发布群消息通知到 Redis（通知所有在线成员）
+	// 4. 发布群消息通知到 Redis（通知所有在线成员，包括发送者用于多设备同步）
 	go func() {
 		notificationCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
-		// 给每个成员（除了发送者）发送通知
+		// 给每个成员发送通知
 		for _, memberID := range memberIDs {
 			if memberID == fromUserID {
-				continue // 跳过发送者本人
+				continue
 			}
-
 			notification := map[string]interface{}{
 				"msg_id":       msgID,
 				"to_user_id":   memberID,
@@ -183,6 +199,11 @@ func (h *MessageHandler) SendGroupMessage(ctx context.Context, req *pb.SendGroup
 				"content":      req.Content,
 				"created_at":   time.Now().Unix(),
 			}
+
+			// // 标记发送者自己的消息
+			// if memberID == fromUserID {
+			// 	notification["is_sender"] = true
+			// }
 
 			notificationJSON, err := json.Marshal(notification)
 			if err != nil {
@@ -202,7 +223,7 @@ func (h *MessageHandler) SendGroupMessage(ctx context.Context, req *pb.SendGroup
 
 		logger.Debug("Notifications published for group message",
 			zap.String("msg_id", msgID),
-			zap.Int("member_count", len(memberIDs)-1))
+			zap.Int("member_count", len(memberIDs)))
 	}()
 
 	// 5. 异步写入数据库
@@ -269,9 +290,7 @@ func (h *MessageHandler) getGroupMembers(ctx context.Context, groupID string) ([
 	return members, nil
 }
 
-// internal/message_service/handler/message_handler.go
-
-// PullMessages 拉取按会话分组的消息（优先从 Redis Stream 读取，支持私聊和群聊）
+// PullMessages 拉取按会话分组的消息（基于游标的增量拉取）
 func (h *MessageHandler) PullMessages(ctx context.Context, req *pb.PullMessagesRequest) (*pb.PullMessagesResponse, error) {
 	// 1. 获取当前用户 ID
 	userID, err := auth.GetUserID(ctx)
@@ -279,7 +298,9 @@ func (h *MessageHandler) PullMessages(ctx context.Context, req *pb.PullMessagesR
 		return nil, err
 	}
 
-	logger.Info("Pulling messages", zap.String("user_id", userID))
+	logger.Info("Pulling messages",
+		zap.String("user_id", userID),
+		zap.String("from_stream_id", req.FromStreamId))
 
 	// 设置默认值
 	limit := req.Limit
@@ -290,25 +311,32 @@ func (h *MessageHandler) PullMessages(ctx context.Context, req *pb.PullMessagesR
 		limit = 100
 	}
 
-	// 2. 从 Redis Stream 读取消息（优先读取最新消息）
-	streamKey := fmt.Sprintf("stream:private:%s", userID)
-	messages, err := h.rdb.XRevRangeN(ctx, streamKey, "+", "-", 500).Result()
-	if err != nil {
-		logger.Warn("Failed to read from stream", zap.Error(err))
+	// 2. 确定起始游标
+	startCursor := req.FromStreamId
+	if startCursor == "" {
+		cursor, err := h.streamOp.GetUserCursor(ctx, userID)
+		if err != nil {
+			logger.Warn("Failed to get user cursor, fallback to beginning", zap.Error(err))
+			cursor = "0-0"
+		}
+		startCursor = cursor
 	}
 
-	// 3. 按会话分组消息
+	// 3. 从 Redis Stream 读取消息（增量拉取）
+	streamKey := fmt.Sprintf("stream:private:%s", userID)
+
+	// 使用 XRange 进行增量拉取：从 startCursor 之后开始
+	messages, err := h.rdb.XRange(ctx, streamKey, "("+startCursor, "+").Result()
+	if err != nil {
+		logger.Warn("Failed to read from stream", zap.Error(err))
+		messages = []redis.XMessage{} // 容错处理
+	}
+
+	// 4. 按会话分组消息
 	conversationMap := make(map[string]*pb.ConversationMessages)
-	var totalUnread int32
 
 	for _, msg := range messages {
 		msgType, _ := msg.Values["type"].(string)
-		isRead := h.isMessageRead(msg.Values)
-
-		// 根据 include_read 参数过滤
-		if !req.IncludeRead && isRead {
-			continue
-		}
 
 		var conversationID string
 		var peerID string
@@ -364,17 +392,12 @@ func (h *MessageHandler) PullMessages(ctx context.Context, req *pb.PullMessagesR
 			FromUserId: getString(msg.Values["from_user_id"]),
 			Content:    getString(msg.Values["content"]),
 			CreatedAt:  getInt64(msg.Values["created_at"]),
-			IsRead:     isRead,
+			IsRead:     false, // 新拉取的消息默认未读
 			StreamId:   msg.ID,
 		}
 
 		conv.Messages = append(conv.Messages, unifiedMsg)
-
-		// 更新未读计数
-		if !isRead {
-			conv.UnreadCount++
-			totalUnread++
-		}
+		conv.UnreadCount++
 
 		// 更新最后消息时间
 		if unifiedMsg.CreatedAt > conv.LastMessageTime {
@@ -382,12 +405,15 @@ func (h *MessageHandler) PullMessages(ctx context.Context, req *pb.PullMessagesR
 		}
 	}
 
-	// 4. 转换为数组并按最后消息时间排序
+	// 5. 转换为数组并按最后消息时间排序
 	var conversations []*pb.ConversationMessages
+	var totalUnread int32
+
 	for _, conv := range conversationMap {
 		// 补充用户/群组信息
 		h.enrichConversationInfo(ctx, conv)
 		conversations = append(conversations, conv)
+		totalUnread += conv.UnreadCount
 	}
 
 	// 按最后消息时间降序排序
@@ -395,12 +421,11 @@ func (h *MessageHandler) PullMessages(ctx context.Context, req *pb.PullMessagesR
 		return conversations[i].LastMessageTime > conversations[j].LastMessageTime
 	})
 
-	// 注意：移除了自动标记已读逻辑，前端需要在成功接收消息后主动调用标记已读接口
-
 	logger.Info("Messages pulled",
 		zap.String("user_id", userID),
 		zap.Int("conversation_count", len(conversations)),
-		zap.Int32("total_unread", totalUnread))
+		zap.Int32("total_unread", totalUnread),
+		zap.Int("total_messages", len(messages)))
 
 	return &pb.PullMessagesResponse{
 		Code:              0,
@@ -489,234 +514,82 @@ func getInt64(v interface{}) int64 {
 	return 0
 }
 
-// GetUnreadCount 获取用户的未读消息数
+// GetUnreadCount 获取用户的未读消息数 [DEPRECATED]
 func (h *MessageHandler) GetUnreadCount(ctx context.Context, req *pb.GetUnreadCountRequest) (*pb.GetUnreadCountResponse, error) {
-	// 1. 验证用户身份
+	logger.Debug("GetUnreadCount called but deprecated")
+
+	return &pb.GetUnreadCountResponse{
+		Code:        0,
+		Message:     "此接口已弃用，请使用基于游标的拉取方式",
+		UnreadCount: 0,
+	}, nil
+}
+
+// UpdateLastSeenCursor 更新会话的已读游标
+func (h *MessageHandler) UpdateLastSeenCursor(ctx context.Context, req *pb.UpdateLastSeenCursorRequest) (*pb.UpdateLastSeenCursorResponse, error) {
 	userID, err := auth.GetUserID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	logger.Debug("Checking unread count", zap.String("user_id", userID))
-
-	// 2. 查询未读消息数
-	query := `SELECT COUNT(*) FROM messages WHERE to_user_id = ? AND is_read = FALSE`
-	var unreadCount int32
-	err = h.db.QueryRowContext(ctx, query, userID).Scan(&unreadCount)
-	if err != nil {
-		logger.Error("Failed to query unread count",
-			zap.String("user_id", userID),
-			zap.Error(err))
-		return nil, status.Errorf(codes.Internal, "Failed to query unread count")
+	if req.LastSeenStreamId == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "last_seen_stream_id is required")
 	}
 
-	logger.Debug("Unread count retrieved",
+	logger.Info("Updating last seen cursor",
 		zap.String("user_id", userID),
-		zap.Int32("count", unreadCount))
+		zap.String("type", req.ConversationType),
+		zap.String("peer_id", req.PeerId),
+		zap.String("cursor", req.LastSeenStreamId))
 
-	return &pb.GetUnreadCountResponse{
-		Code:        0,
-		Message:     "查询成功",
-		UnreadCount: unreadCount,
+	if err := h.streamOp.SetUserCursor(ctx, userID, req.LastSeenStreamId); err != nil {
+		logger.Error("Failed to set user cursor", zap.Error(err))
+		return nil, status.Errorf(codes.Internal, "Failed to update cursor")
+	}
+
+	// 兼容群聊的数据库已读状态同步
+	switch req.ConversationType {
+	case "group":
+		if req.PeerId == "" {
+			return nil, status.Errorf(codes.InvalidArgument, "peer_id (group_id) is required for group conversation")
+		}
+
+		go func() {
+			dbCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			h.db.ExecContext(dbCtx, `
+				INSERT INTO group_read_states (group_id, user_id, last_read_msg_id, last_read_at)
+				VALUES (?, ?, ?, NOW())
+				ON DUPLICATE KEY UPDATE
+					last_read_msg_id = VALUES(last_read_msg_id),
+					last_read_at = NOW()
+			`, req.PeerId, userID, req.LastSeenStreamId)
+		}()
+
+	case "", "private":
+		// 私聊或未指定类型无需额外处理
+	default:
+		return nil, status.Errorf(codes.InvalidArgument, "invalid conversation_type: %s", req.ConversationType)
+	}
+
+	cursor, _ := h.streamOp.GetUserCursor(ctx, userID)
+
+	logger.Info("Cursor updated successfully",
+		zap.String("user_id", userID),
+		zap.String("type", req.ConversationType),
+		zap.String("cursor", cursor))
+
+	return &pb.UpdateLastSeenCursorResponse{
+		Code:    0,
+		Message: "游标更新成功",
+		Cursor:  cursor,
 	}, nil
 }
 
 // PullUnreadMessages 拉取所有未读消息
-func (h *MessageHandler) PullUnreadMessages(ctx context.Context, req *pb.PullUnreadMessagesRequest) (*pb.PullUnreadMessagesResponse, error) {
-	// 1. 验证用户身份
-	userID, err := auth.GetUserID(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	logger.Info("Pulling unread messages", zap.String("user_id", userID))
-
-	// 设置默认 limit，并限制最大值
-	limit := req.Limit
-	if limit <= 0 {
-		limit = 100
-	}
-	if limit > 200 {
-		limit = 200
-	}
-
-	// 2. 查询未读消息列表，使用窗口函数一次查询 total
-	query := `
-		SELECT id, from_user_id, to_user_id, content, is_read, read_at, created_at,
-		       COUNT(*) OVER() AS total_count
-		FROM messages
-		WHERE to_user_id = ? AND is_read = FALSE
-		ORDER BY created_at DESC
-		LIMIT ?`
-
-	rows, err := h.db.QueryContext(ctx, query, userID, limit)
-	if err != nil {
-		logger.Error("Failed to query unread messages",
-			zap.String("user_id", userID),
-			zap.Error(err))
-		return nil, status.Errorf(codes.Internal, "Failed to query unread messages")
-	}
-	defer rows.Close()
-
-	// 4. 遍历结果集，构建消息列表和 ID 列表
-	var (
-		messages []*pb.Message
-
-		totalUnread int64
-		totalSeen   bool
-	)
-
-	for rows.Next() {
-		var (
-			id           string
-			fromUserID   string
-			toUserID     string
-			content      string
-			isRead       bool
-			readAtStr    sql.NullString
-			createdAtStr string
-			rowTotal     sql.NullInt64
-		)
-
-		if err := rows.Scan(&id, &fromUserID, &toUserID, &content, &isRead, &readAtStr, &createdAtStr, &rowTotal); err != nil {
-			logger.Warn("Failed to scan message row", zap.Error(err))
-			continue
-		}
-
-		msg, err := convertDBRowToMessage(id, fromUserID, toUserID, content, isRead, readAtStr, createdAtStr)
-		if err != nil {
-			logger.Warn("Failed to convert db row to message", zap.Error(err))
-			continue
-		}
-
-		messages = append(messages, msg)
-
-		if rowTotal.Valid && !totalSeen {
-			totalUnread = rowTotal.Int64
-			totalSeen = true
-		}
-	}
-
-	// 检查遍历过程中是否有错误
-	if err = rows.Err(); err != nil {
-		logger.Error("Error occurred during rows iteration", zap.Error(err))
-		return nil, status.Errorf(codes.Internal, "Failed to process messages")
-	}
-
-	// 注意：移除了自动标记已读逻辑，前端需要在成功接收消息后主动调用标记已读接口
-
-	// 6. 判断是否还有更多未读消息
-	hasMore := totalUnread > int64(len(messages))
-
-	logger.Info("Unread messages pulled",
-		zap.String("user_id", userID),
-		zap.Int("count", len(messages)),
-		zap.Int64("total", totalUnread))
-
-	// 7. 返回响应
-	return &pb.PullUnreadMessagesResponse{
-		Code:        0,
-		Message:     "成功拉取未读消息",
-		Msgs:        messages,
-		TotalUnread: int32(totalUnread),
-		HasMore:     hasMore,
-	}, nil
-}
 
 // PullAllUnreadOnLogin 登录时拉取所有未读消息（私聊 + 群聊）
-// 注意：移除了自动标记已读逻辑，前端需要在成功接收消息后主动调用标记已读接口
-func (h *MessageHandler) PullAllUnreadOnLogin(ctx context.Context, req *pb.PullAllUnreadOnLoginRequest) (*pb.PullAllUnreadOnLoginResponse, error) {
-	userID, err := auth.GetUserID(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	logger.Info("Pulling all unread messages on login", zap.String("user_id", userID))
-
-	// 1. 记录用户上线时间
-	h.streamOp.RecordUserOnlineTime(ctx, userID)
-
-	// 2. 从用户的 Redis Stream 读取所有未读消息（私聊和群聊都在 stream:private:{user_id} 中）
-	streamKey := fmt.Sprintf("stream:private:%s", userID)
-	messages, err := h.rdb.XRevRangeN(ctx, streamKey, "+", "-", 1000).Result()
-	if err != nil {
-		logger.Warn("Failed to read from stream", zap.Error(err))
-	}
-
-	// 3. 按消息类型分组
-	var privateMessages []*pb.Message
-	groupMessages := make(map[string]*pb.GroupUnreadInfo)
-
-	for _, msg := range messages {
-		msgType, _ := msg.Values["type"].(string)
-		isRead := h.isMessageRead(msg.Values)
-
-		// 只处理未读消息
-		if isRead {
-			continue
-		}
-
-		switch msgType {
-		case "private":
-			// 私聊消息
-			pbMsg := &pb.Message{
-				Id:         getString(msg.Values["msg_id"]),
-				FromUserId: getString(msg.Values["from_user_id"]),
-				ToUserId:   getString(msg.Values["to_user_id"]),
-				Content:    getString(msg.Values["content"]),
-				IsRead:     false,
-				CreatedAt:  getInt64(msg.Values["created_at"]),
-			}
-			privateMessages = append(privateMessages, pbMsg)
-
-		case "group":
-			// 群聊消息
-			groupID := getString(msg.Values["group_id"])
-			pbMsg := &pb.Message{
-				Id:         getString(msg.Values["msg_id"]),
-				FromUserId: getString(msg.Values["from_user_id"]),
-				Content:    getString(msg.Values["content"]),
-				IsRead:     false,
-				CreatedAt:  getInt64(msg.Values["created_at"]),
-			}
-
-			if _, exists := groupMessages[groupID]; !exists {
-				groupMessages[groupID] = &pb.GroupUnreadInfo{
-					GroupId:     groupID,
-					UnreadCount: 0,
-					Messages:    []*pb.Message{},
-				}
-			}
-			groupMessages[groupID].Messages = append(groupMessages[groupID].Messages, pbMsg)
-			groupMessages[groupID].UnreadCount++
-		}
-	}
-
-	// 4. 计算总数
-	totalCount := int32(len(privateMessages))
-	for _, detail := range groupMessages {
-		totalCount += detail.UnreadCount
-	}
-
-	logger.Info("All unread messages pulled",
-		zap.String("user_id", userID),
-		zap.Int("private_count", len(privateMessages)),
-		zap.Int("group_count", len(groupMessages)),
-		zap.Int32("total_count", totalCount))
-
-	response := &pb.PullAllUnreadOnLoginResponse{
-		Code:               0,
-		Message:            "成功拉取未读消息",
-		PrivateMessages:    privateMessages,
-		PrivateUnreadCount: int32(len(privateMessages)),
-		GroupMessages:      groupMessages,
-		GroupUnreadCount:   int32(len(groupMessages)),
-		TotalUnreadCount:   totalCount,
-		PulledAt:           time.Now().Format(time.RFC3339),
-	}
-
-	return response, nil
-}
 
 // convertDBRowToMessage 辅助函数：将数据库行转换为 Message 对象
 func convertDBRowToMessage(id, fromUserID, toUserID, content string, isRead bool, readAt sql.NullString, createdAtStr string) (*pb.Message, error) {
@@ -745,7 +618,8 @@ func convertDBRowToMessage(id, fromUserID, toUserID, content string, isRead bool
 	return msg, nil
 }
 
-// MarkPrivateMessageAsRead 标记私聊消息为已读
+// MarkPrivateMessageAsRead 标记私聊消息为已读（仅更新数据库）
+// 注意：此方法不更新游标，游标应通过 UpdateLastSeenCursor 方法统一管理
 func (h *MessageHandler) MarkPrivateMessageAsRead(ctx context.Context, req *pb.MarkPrivateMessageAsReadRequest) (*pb.MarkPrivateMessageAsReadResponse, error) {
 	userID, err := auth.GetUserID(ctx)
 	if err != nil {
@@ -753,14 +627,15 @@ func (h *MessageHandler) MarkPrivateMessageAsRead(ctx context.Context, req *pb.M
 	}
 
 	msgID := req.MessageId
-
-	// 1. 在 Redis Stream 中更新已读状态
-	err = h.streamOp.UpdatePrivateMessageAsRead(ctx, userID, msgID)
-	if err != nil {
-		logger.Warn("Failed to update message read status in stream", zap.Error(err))
+	if msgID == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "message_id is required")
 	}
 
-	// 2. 异步更新数据库
+	logger.Debug("Marking private message as read",
+		zap.String("msg_id", msgID),
+		zap.String("user_id", userID))
+
+	// 异步更新数据库
 	go func() {
 		dbCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -780,7 +655,8 @@ func (h *MessageHandler) MarkPrivateMessageAsRead(ctx context.Context, req *pb.M
 	}, nil
 }
 
-// MarkGroupMessageAsRead 标记群聊消息为已读
+// MarkGroupMessageAsRead 标记群聊消息为已读（仅更新数据库）
+// 注意：此方法不更新游标，游标应通过 UpdateLastSeenCursor 方法统一管理
 func (h *MessageHandler) MarkGroupMessageAsRead(ctx context.Context, req *pb.MarkGroupMessageAsReadRequest) (*pb.MarkGroupMessageAsReadResponse, error) {
 	userID, err := auth.GetUserID(ctx)
 	if err != nil {
@@ -790,13 +666,16 @@ func (h *MessageHandler) MarkGroupMessageAsRead(ctx context.Context, req *pb.Mar
 	groupID := req.GroupId
 	lastReadMsgID := req.LastReadMessageId
 
-	// 1. 在 Redis Stream 中更新已读状态
-	err = h.streamOp.UpdateGroupMessageAsRead(ctx, groupID, lastReadMsgID)
-	if err != nil {
-		logger.Warn("Failed to update message read status in stream", zap.Error(err))
+	if groupID == "" || lastReadMsgID == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "group_id and last_read_message_id are required")
 	}
 
-	// 2. 异步更新数据库
+	logger.Debug("Marking group messages as read",
+		zap.String("group_id", groupID),
+		zap.String("last_msg_id", lastReadMsgID),
+		zap.String("user_id", userID))
+
+	// 异步更新数据库
 	go func() {
 		dbCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

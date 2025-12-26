@@ -318,27 +318,59 @@ func (h *GroupHandler) SendGroupJoinRequest(ctx context.Context, req *pb.SendGro
 		return nil, status.Errorf(codes.AlreadyExists, "已经是群成员")
 	}
 
-	// 3. 检查是否已有待处理的申请
-	var pendingCount int
+	// 3. 检查是否已有申请记录（无论状态如何）
+	var existingReqID string
+	var existingStatus sql.NullString
 	err = h.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM group_join_requests WHERE group_id = ? AND from_user_id = ? AND status = 'pending'",
-		req.GroupId, fromUserID).Scan(&pendingCount)
-	if err != nil {
-		log.Printf("Error checking pending requests: %v", err)
-		return nil, status.Errorf(codes.Internal, "检查申请状态失败")
-	}
-	if pendingCount > 0 {
-		return nil, status.Errorf(codes.AlreadyExists, "已发送过申请，请等待处理")
+		"SELECT id, status FROM group_join_requests WHERE group_id = ? AND from_user_id = ?",
+		req.GroupId, fromUserID).Scan(&existingReqID, &existingStatus)
+
+	if err != nil && err != sql.ErrNoRows {
+		log.Printf("Error checking existing requests: %v", err)
+		return nil, status.Errorf(codes.Internal, "检查申请状态失败: %v", err)
 	}
 
-	// 4. 创建加群申请
+	if err == nil {
+		statusStr := ""
+		if existingStatus.Valid {
+			statusStr = existingStatus.String
+		}
+		// 存在历史记录
+		if statusStr == "pending" {
+			return nil, status.Errorf(codes.AlreadyExists, "已发送过申请，请等待处理")
+		}
+
+		// 如果是其他状态（rejected, accepted, cancelled），则更新为 pending 并更新消息和时间
+		// 注意：这里我们复用旧的 ID，或者也可以选择删除旧的插入新的。复用旧 ID 比较简单。
+		// 更新 created_at 以便在按时间排序时能排在前面
+		_, err = h.db.ExecContext(ctx,
+			"UPDATE group_join_requests SET message = ?, status = 'pending', created_at = NOW() WHERE id = ?",
+			req.Message, existingReqID)
+		if err != nil {
+			log.Printf("Failed to update group join request: %v", err)
+			return nil, status.Errorf(codes.Internal, "更新申请失败: %v", err)
+		}
+
+		log.Printf("Group join request %s updated successfully (re-applied)", existingReqID)
+
+		return &pb.SendGroupJoinRequestResponse{
+			Code:      0,
+			Message:   "加群申请已发送",
+			RequestId: existingReqID,
+		}, nil
+	}
+
+	// 4. 创建新加群申请
 	requestID := uuid.New().String()
 	query := `INSERT INTO group_join_requests (id, group_id, from_user_id, message, status, created_at) 
 	          VALUES (?, ?, ?, ?, 'pending', NOW())`
 	_, err = h.db.ExecContext(ctx, query, requestID, req.GroupId, fromUserID, req.Message)
 	if err != nil {
+		if strings.Contains(err.Error(), "Duplicate entry") {
+			return nil, status.Errorf(codes.AlreadyExists, "已发送过申请")
+		}
 		log.Printf("Failed to create group join request: %v", err)
-		return nil, status.Errorf(codes.Internal, "创建申请失败")
+		return nil, status.Errorf(codes.Internal, "创建申请失败: %v", err)
 	}
 
 	log.Printf("Group join request %s created successfully", requestID)
@@ -360,7 +392,8 @@ func (h *GroupHandler) HandleGroupJoinRequest(ctx context.Context, req *pb.Handl
 	log.Printf("User %s handling group join request %s with action %d", reviewerID, req.RequestId, req.Action)
 
 	// 1. 查询申请信息
-	var groupID, fromUserID, currentStatus string
+	var groupID, fromUserID string
+	var currentStatus sql.NullString
 	err = h.db.QueryRowContext(ctx,
 		"SELECT group_id, from_user_id, status FROM group_join_requests WHERE id = ?",
 		req.RequestId).Scan(&groupID, &fromUserID, &currentStatus)
@@ -372,8 +405,13 @@ func (h *GroupHandler) HandleGroupJoinRequest(ctx context.Context, req *pb.Handl
 		return nil, status.Errorf(codes.Internal, "查询申请失败")
 	}
 
+	statusStr := ""
+	if currentStatus.Valid {
+		statusStr = currentStatus.String
+	}
+
 	// 2. 检查申请状态
-	if currentStatus != "pending" {
+	if statusStr != "pending" {
 		return nil, status.Errorf(codes.FailedPrecondition, "申请已被处理")
 	}
 
@@ -414,12 +452,14 @@ func (h *GroupHandler) HandleGroupJoinRequest(ctx context.Context, req *pb.Handl
 
 	// 5. 如果接受，添加用户到群组
 	if req.Action == 1 {
-		_, err = h.db.ExecContext(ctx,
-			"INSERT INTO group_members (group_id, user_id, role, joined_at) VALUES (?, ?, 'member', NOW())",
-			groupID, fromUserID)
+		// 使用 ON DUPLICATE KEY UPDATE 处理重新加入的情况（之前可能软删除了）
+		query := `INSERT INTO group_members (group_id, user_id, role, joined_at, is_deleted) 
+		          VALUES (?, ?, 'member', NOW(), 0)
+		          ON DUPLICATE KEY UPDATE role = 'member', joined_at = NOW(), is_deleted = 0`
+		_, err = h.db.ExecContext(ctx, query, groupID, fromUserID)
 		if err != nil {
 			log.Printf("Failed to add member to group: %v", err)
-			return nil, status.Errorf(codes.Internal, "添加成员失败")
+			return nil, status.Errorf(codes.Internal, "添加成员失败: %v", err)
 		}
 		log.Printf("User %s added to group %s", fromUserID, groupID)
 	}

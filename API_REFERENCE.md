@@ -43,14 +43,11 @@ Response:
 {
   "code": 0,
   "message": "string",
-  "token": "string",       // JWT Token
-  "private_unreads": [...],  // 私聊未读消息列表（可能为空）
-  "private_unread_count": 0,
-  "group_unreads": [...],    // 群聊未读概览（可能为空）
-  "group_unread_count": 0,
-  "total_unread_count": 0
+  "token": "string"       // JWT Token
 }
 ```
+
+> **注意**：登录后前端应主动调用 `GET /messages` 拉取未读消息。
 
 ### 1.3 获取当前用户信息
 ```
@@ -133,13 +130,12 @@ Response:
 
 ### 2.2 拉取消息（按会话分组，支持私聊 + 群聊）
 ```
-GET /messages?limit=20&auto_mark=false&include_read=false
+GET /messages?from_stream_id=&limit=20
 Authorization: Bearer {token}
 
 Query Parameters:
+- from_stream_id: 从哪个 Stream ID 开始拉取（空则使用存储的用户游标）
 - limit: 每个会话最多拉取消息数（默认20，最大100）
-- auto_mark: 是否自动标记为已读（默认false）
-- include_read: 是否包含已读消息（默认false，仅返回未读）
 
 Response:
 {
@@ -160,12 +156,10 @@ Response:
           "type": "private" | "group",
           "from_user_id": "string",
           "from_user_name": "string",
-          "to_user_id": "string",
-          "group_id": "string",
           "content": "string",
           "created_at": 0,
           "is_read": false,
-          "stream_id": "string"
+          "stream_id": "string"  // 用于 UpdateLastSeenCursor
         }
       ]
     }
@@ -175,60 +169,88 @@ Response:
 }
 ```
 
-### 2.3 获取未读消息数
+> **推荐使用方式**：
+> 1. 用户上线时调用，获取未读消息列表
+> 2. 前端自行计算未读数量（根据 messages 数组长度）
+> 3. 用户阅读消息后，调用 `POST /messages/cursor` 更新已读游标
+
+### 2.3 更新已读游标
 ```
-GET /messages/unread
+POST /messages/cursor
+Authorization: Bearer {token}
+Content-Type: application/json
+
+Request:
+{
+  "last_seen_stream_id": "string",      // 最后已读的 Stream ID
+  "conversation_type": "private" | "group",  // 会话类型（可选）
+  "peer_id": "string"                   // 对方ID或群ID（群聊时必填）
+}
+
+Response:
+{
+  "code": 0,
+  "message": "游标更新成功",
+  "cursor": "string"  // 更新后的游标值
+}
+```
+
+> **使用场景**：用户阅读消息后，前端调用此接口更新游标，下次 `GET /messages` 时将从此游标之后开始拉取。
+
+### 2.3.1 获取未读消息数 [DEPRECATED]
+```
+GET /messages/unread  // 已弃用，请使用 GET /messages 后由前端计算
 Authorization: Bearer {token}
 
 Response:
 {
   "code": 0,
-  "message": "string",
+  "message": "此接口已弃用，请使用基于游标的拉取方式",
   "unread_count": 0
 }
 ```
 
-### 2.4 拉取未读消息
+### 2.4 标记私聊消息为已读
 ```
-GET /messages/unread/pull?limit=100&auto_mark=true
+POST /messages/read
 Authorization: Bearer {token}
+Content-Type: application/json
+
+Request:
+{
+  "message_id": "string"
+}
 
 Response:
 {
   "code": 0,
-  "message": "string",
-  "msgs": [
-    {
-      "id": "string",
-      "from_user_id": "string",
-      "to_user_id": "string",
-      "content": "string",
-      "created_at": 0,
-      "is_read": false,
-      "read_at": 0
-    }
-  ],
-  "total_unread": 0,
-  "has_more": false
+  "message": "消息已标记为已读"
 }
 ```
 
-### 2.5 拉取所有未读消息（含群聊）
+> **注意**：此接口仅更新数据库已读状态，不更新游标。游标应通过 `POST /messages/cursor` 统一管理。
+
+### 2.5 标记群聊消息为已读
 ```
-GET /unread/all
+POST /groups/{group_id}/read
 Authorization: Bearer {token}
+Content-Type: application/json
+
+Request:
+{
+  "last_read_message_id": "string"
+}
 
 Response:
 {
   "code": 0,
-  "message": "string",
-  "private_unreads": [...],     // 私聊未读消息
-  "group_unreads": {...},       // 群聊未读消息（map 结构，key 为 group_id）
-  "total_unread_count": 0       // 总未读数
+  "message": "群聊消息已标记为已读"
 }
 ```
 
----
+> **注意**：此接口仅更新数据库已读状态，不更新游标。游标应通过 `POST /messages/cursor` 统一管理。
+
+
 
 ## 3. 群组管理
 

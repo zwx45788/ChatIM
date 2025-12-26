@@ -66,20 +66,17 @@ export const api = {
             msg_type: msgType 
         }, token);
     },
-    pullPrivateMessages(toUserId, limit = 20, token) {
-        return this.request(`/api/v1/messages?to_user_id=${toUserId}&limit=${limit}`, 'GET', null, token);
+    pullMessages(limit = 20, auto_mark = false, include_read = false, token) {
+        return this.request(`/api/v1/messages?limit=${limit}&auto_mark=${auto_mark}&include_read=${include_read}`, 'GET', null, token);
     },
-    markMessagesRead(msgIds, token) {
-        return this.request('/api/v1/messages/read', 'POST', { msg_ids: msgIds }, token);
+    markPrivateMessageRead(messageId, token) {
+        return this.request('/api/v1/messages/read', 'POST', { message_id: messageId }, token);
+    },
+    markGroupMessageRead(groupId, lastReadMessageId, token) {
+        return this.request(`/api/v1/groups/${groupId}/read`, 'POST', { last_read_message_id: lastReadMessageId }, token);
     },
     getUnreadCount(token) {
         return this.request('/api/v1/messages/unread', 'GET', null, token);
-    },
-    pullPrivateUnread(token) {
-        return this.request('/api/v1/messages/unread/pull', 'GET', null, token);
-    },
-    getAllUnread(token) {
-        return this.request('/api/v1/unread/all', 'GET', null, token);
     },
 
     // 3. 群组管理

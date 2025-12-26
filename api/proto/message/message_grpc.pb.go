@@ -22,8 +22,8 @@ const (
 	MessageService_SendMessage_FullMethodName              = "/proto.message.MessageService/SendMessage"
 	MessageService_SendGroupMessage_FullMethodName         = "/proto.message.MessageService/SendGroupMessage"
 	MessageService_PullMessages_FullMethodName             = "/proto.message.MessageService/PullMessages"
-	MessageService_MarkMessagesAsRead_FullMethodName       = "/proto.message.MessageService/MarkMessagesAsRead"
 	MessageService_GetUnreadCount_FullMethodName           = "/proto.message.MessageService/GetUnreadCount"
+	MessageService_UpdateLastSeenCursor_FullMethodName     = "/proto.message.MessageService/UpdateLastSeenCursor"
 	MessageService_PullUnreadMessages_FullMethodName       = "/proto.message.MessageService/PullUnreadMessages"
 	MessageService_PullAllUnreadOnLogin_FullMethodName     = "/proto.message.MessageService/PullAllUnreadOnLogin"
 	MessageService_MarkPrivateMessageAsRead_FullMethodName = "/proto.message.MessageService/MarkPrivateMessageAsRead"
@@ -43,13 +43,18 @@ type MessageServiceClient interface {
 	SendGroupMessage(ctx context.Context, in *SendGroupMessageRequest, opts ...grpc.CallOption) (*SendGroupMessageResponse, error)
 	// 拉取消息
 	PullMessages(ctx context.Context, in *PullMessagesRequest, opts ...grpc.CallOption) (*PullMessagesResponse, error)
-	// 标记消息已读
-	MarkMessagesAsRead(ctx context.Context, in *MarkMessagesAsReadRequest, opts ...grpc.CallOption) (*MarkMessagesAsReadResponse, error)
-	// 获取未读消息数
+	// [DEPRECATED: 此接口已弃用] 获取未读消息数
 	GetUnreadCount(ctx context.Context, in *GetUnreadCountRequest, opts ...grpc.CallOption) (*GetUnreadCountResponse, error)
-	// 拉取所有未读消息（新增）
+	// 更新已读游标
+	UpdateLastSeenCursor(ctx context.Context, in *UpdateLastSeenCursorRequest, opts ...grpc.CallOption) (*UpdateLastSeenCursorResponse, error)
+	// [DEPRECATED: 此接口已弃用]
+	// 拉取所有未读消息。建议改为使用 PullMessages 拉取按会话分组的消息，并用 GetUnreadCount 获取总数。
 	PullUnreadMessages(ctx context.Context, in *PullUnreadMessagesRequest, opts ...grpc.CallOption) (*PullUnreadMessagesResponse, error)
-	// 登录时拉取所有未读消息
+	// [DEPRECATED: 此接口已弃用]
+	// 登录时拉取所有未读消息。建议改为：
+	// 1. 上线时调用 PullMessages 拉取按会话分组的消息（用于初始化会话列表）
+	// 2. 使用 GetUnreadCount 获取未读总数
+	// 3. 在线消息通过 WebSocket 推送，无需轮询此接口
 	PullAllUnreadOnLogin(ctx context.Context, in *PullAllUnreadOnLoginRequest, opts ...grpc.CallOption) (*PullAllUnreadOnLoginResponse, error)
 	// 标记私聊消息已读
 	MarkPrivateMessageAsRead(ctx context.Context, in *MarkPrivateMessageAsReadRequest, opts ...grpc.CallOption) (*MarkPrivateMessageAsReadResponse, error)
@@ -97,20 +102,20 @@ func (c *messageServiceClient) PullMessages(ctx context.Context, in *PullMessage
 	return out, nil
 }
 
-func (c *messageServiceClient) MarkMessagesAsRead(ctx context.Context, in *MarkMessagesAsReadRequest, opts ...grpc.CallOption) (*MarkMessagesAsReadResponse, error) {
+func (c *messageServiceClient) GetUnreadCount(ctx context.Context, in *GetUnreadCountRequest, opts ...grpc.CallOption) (*GetUnreadCountResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(MarkMessagesAsReadResponse)
-	err := c.cc.Invoke(ctx, MessageService_MarkMessagesAsRead_FullMethodName, in, out, cOpts...)
+	out := new(GetUnreadCountResponse)
+	err := c.cc.Invoke(ctx, MessageService_GetUnreadCount_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *messageServiceClient) GetUnreadCount(ctx context.Context, in *GetUnreadCountRequest, opts ...grpc.CallOption) (*GetUnreadCountResponse, error) {
+func (c *messageServiceClient) UpdateLastSeenCursor(ctx context.Context, in *UpdateLastSeenCursorRequest, opts ...grpc.CallOption) (*UpdateLastSeenCursorResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetUnreadCountResponse)
-	err := c.cc.Invoke(ctx, MessageService_GetUnreadCount_FullMethodName, in, out, cOpts...)
+	out := new(UpdateLastSeenCursorResponse)
+	err := c.cc.Invoke(ctx, MessageService_UpdateLastSeenCursor_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -179,13 +184,18 @@ type MessageServiceServer interface {
 	SendGroupMessage(context.Context, *SendGroupMessageRequest) (*SendGroupMessageResponse, error)
 	// 拉取消息
 	PullMessages(context.Context, *PullMessagesRequest) (*PullMessagesResponse, error)
-	// 标记消息已读
-	MarkMessagesAsRead(context.Context, *MarkMessagesAsReadRequest) (*MarkMessagesAsReadResponse, error)
-	// 获取未读消息数
+	// [DEPRECATED: 此接口已弃用] 获取未读消息数
 	GetUnreadCount(context.Context, *GetUnreadCountRequest) (*GetUnreadCountResponse, error)
-	// 拉取所有未读消息（新增）
+	// 更新已读游标
+	UpdateLastSeenCursor(context.Context, *UpdateLastSeenCursorRequest) (*UpdateLastSeenCursorResponse, error)
+	// [DEPRECATED: 此接口已弃用]
+	// 拉取所有未读消息。建议改为使用 PullMessages 拉取按会话分组的消息，并用 GetUnreadCount 获取总数。
 	PullUnreadMessages(context.Context, *PullUnreadMessagesRequest) (*PullUnreadMessagesResponse, error)
-	// 登录时拉取所有未读消息
+	// [DEPRECATED: 此接口已弃用]
+	// 登录时拉取所有未读消息。建议改为：
+	// 1. 上线时调用 PullMessages 拉取按会话分组的消息（用于初始化会话列表）
+	// 2. 使用 GetUnreadCount 获取未读总数
+	// 3. 在线消息通过 WebSocket 推送，无需轮询此接口
 	PullAllUnreadOnLogin(context.Context, *PullAllUnreadOnLoginRequest) (*PullAllUnreadOnLoginResponse, error)
 	// 标记私聊消息已读
 	MarkPrivateMessageAsRead(context.Context, *MarkPrivateMessageAsReadRequest) (*MarkPrivateMessageAsReadResponse, error)
@@ -212,11 +222,11 @@ func (UnimplementedMessageServiceServer) SendGroupMessage(context.Context, *Send
 func (UnimplementedMessageServiceServer) PullMessages(context.Context, *PullMessagesRequest) (*PullMessagesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method PullMessages not implemented")
 }
-func (UnimplementedMessageServiceServer) MarkMessagesAsRead(context.Context, *MarkMessagesAsReadRequest) (*MarkMessagesAsReadResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method MarkMessagesAsRead not implemented")
-}
 func (UnimplementedMessageServiceServer) GetUnreadCount(context.Context, *GetUnreadCountRequest) (*GetUnreadCountResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetUnreadCount not implemented")
+}
+func (UnimplementedMessageServiceServer) UpdateLastSeenCursor(context.Context, *UpdateLastSeenCursorRequest) (*UpdateLastSeenCursorResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateLastSeenCursor not implemented")
 }
 func (UnimplementedMessageServiceServer) PullUnreadMessages(context.Context, *PullUnreadMessagesRequest) (*PullUnreadMessagesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method PullUnreadMessages not implemented")
@@ -308,24 +318,6 @@ func _MessageService_PullMessages_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
-func _MessageService_MarkMessagesAsRead_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MarkMessagesAsReadRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MessageServiceServer).MarkMessagesAsRead(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: MessageService_MarkMessagesAsRead_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MessageServiceServer).MarkMessagesAsRead(ctx, req.(*MarkMessagesAsReadRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _MessageService_GetUnreadCount_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetUnreadCountRequest)
 	if err := dec(in); err != nil {
@@ -340,6 +332,24 @@ func _MessageService_GetUnreadCount_Handler(srv interface{}, ctx context.Context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(MessageServiceServer).GetUnreadCount(ctx, req.(*GetUnreadCountRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MessageService_UpdateLastSeenCursor_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateLastSeenCursorRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MessageServiceServer).UpdateLastSeenCursor(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MessageService_UpdateLastSeenCursor_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MessageServiceServer).UpdateLastSeenCursor(ctx, req.(*UpdateLastSeenCursorRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -454,12 +464,12 @@ var MessageService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _MessageService_PullMessages_Handler,
 		},
 		{
-			MethodName: "MarkMessagesAsRead",
-			Handler:    _MessageService_MarkMessagesAsRead_Handler,
-		},
-		{
 			MethodName: "GetUnreadCount",
 			Handler:    _MessageService_GetUnreadCount_Handler,
+		},
+		{
+			MethodName: "UpdateLastSeenCursor",
+			Handler:    _MessageService_UpdateLastSeenCursor_Handler,
 		},
 		{
 			MethodName: "PullUnreadMessages",

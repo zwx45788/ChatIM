@@ -75,11 +75,12 @@ message UnifiedMessage {
   string stream_id = 10;       // Stream 消息ID（用于分页）
 }
 
-//拉取消息的请求（改为拉取按会话分组的未读消息）
+//拉取消息的请求(改为拉取按会话分组的未读消息)
 message PullMessagesRequest{
-  int64 limit = 1;             // 每个会话最多拉取的消息数（默认20）
-  bool auto_mark = 2;          // 是否自动标记为已读（默认false）
-  bool include_read = 3;       // 是否包含已读消息（默认false，只返回未读）
+  int64 limit = 1;             // 每个会话最多拉取的消息数(默认20)
+  bool auto_mark = 2;          // 是否自动标记为已读(默认false)
+  bool include_read = 3;       // 是否包含已读消息(默认false,只返回未读)
+  string from_stream_id = 4;   // 从该 Stream ID 之后开始拉取(用于增量拉取)
 }
 
 //拉取消息的响应（返回结构化的会话列表）
@@ -179,6 +180,20 @@ message PullGroupMessagesResponse {
   bool has_more = 5;       // 是否还有更多消息
 }
 
+// 更新已读游标请求
+message UpdateLastSeenCursorRequest {
+  string conversation_type = 1; // "private" 或 "group"
+  string peer_id = 2;           // 对方用户ID或群组ID
+  string last_seen_stream_id = 3; // 最后已读的 Stream ID
+}
+
+// 更新已读游标响应
+message UpdateLastSeenCursorResponse {
+  int32 code = 1;
+  string message = 2;
+  string cursor = 3;            // 更新后的游标值
+}
+
 // 定义消息服务
 service MessageService {
   // 发送一条私聊消息
@@ -187,11 +202,18 @@ service MessageService {
   rpc SendGroupMessage (SendGroupMessageRequest) returns (SendGroupMessageResponse);
   // 拉取消息
   rpc PullMessages (PullMessagesRequest) returns (PullMessagesResponse);
-  // 获取未读消息数
+  // [DEPRECATED: 此接口已弃用] 获取未读消息数
   rpc GetUnreadCount (GetUnreadCountRequest) returns (GetUnreadCountResponse);
-  // 拉取所有未读消息（新增）
+  // 更新已读游标
+  rpc UpdateLastSeenCursor (UpdateLastSeenCursorRequest) returns (UpdateLastSeenCursorResponse);
+  // [DEPRECATED: 此接口已弃用]
+  // 拉取所有未读消息。建议改为使用 PullMessages 拉取按会话分组的消息，并用 GetUnreadCount 获取总数。
   rpc PullUnreadMessages (PullUnreadMessagesRequest) returns (PullUnreadMessagesResponse);
-  // 登录时拉取所有未读消息
+  // [DEPRECATED: 此接口已弃用]
+  // 登录时拉取所有未读消息。建议改为：
+  // 1. 上线时调用 PullMessages 拉取按会话分组的消息（用于初始化会话列表）
+  // 2. 使用 GetUnreadCount 获取未读总数
+  // 3. 在线消息通过 WebSocket 推送，无需轮询此接口
   rpc PullAllUnreadOnLogin (PullAllUnreadOnLoginRequest) returns (PullAllUnreadOnLoginResponse);
   // 标记私聊消息已读
   rpc MarkPrivateMessageAsRead (MarkPrivateMessageAsReadRequest) returns (MarkPrivateMessageAsReadResponse);

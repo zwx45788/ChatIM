@@ -88,37 +88,25 @@ export const useMainStore = defineStore('main', {
         async pullMessages() {
             if (!this.token) return;
             try {
-                // 拉取私聊
-                const privateRes = await api.pullPrivateUnread(this.token);
-                if (privateRes.messages) {
-                    privateRes.messages.forEach(msg => {
-                        // 对方发给我的，ID是 from_user_id
-                        // 我发给对方的（多端同步），ID是 to_user_id
-                        // 这里简化，假设拉取到的都是别人发给我的
-                        this.addMessage('private', msg.from_user_id, {
-                            id: msg.msg_id,
-                            sender_id: msg.from_user_id,
-                            content: msg.content,
-                            type: msg.msg_type,
-                            created_at: msg.created_at,
-                            is_self: false
-                        });
-                    });
-                }
-                
-                // 拉取群聊
-                const groupRes = await api.pullGroupUnread(this.token);
-                if (groupRes.group_messages) {
-                    groupRes.group_messages.forEach(msg => {
-                        this.addMessage('group', msg.group_id, {
-                            id: msg.msg_id,
-                            sender_id: msg.from_user_id,
-                            group_id: msg.group_id,
-                            content: msg.content,
-                            type: msg.msg_type,
-                            created_at: msg.created_at,
-                            is_self: msg.from_user_id === this.user.id
-                        });
+                const res = await api.pullMessages(100, false, false, this.token);
+                if (res.conversations) {
+                    res.conversations.forEach(conv => {
+                        const type = conv.type; // 'private' or 'group'
+                        const peerId = conv.peer_id;
+                        
+                        if (conv.messages) {
+                            conv.messages.forEach(msg => {
+                                this.addMessage(type, peerId, {
+                                    id: msg.id,
+                                    sender_id: msg.from_user_id,
+                                    group_id: msg.group_id,
+                                    content: msg.content,
+                                    type: 'text', // Default to text
+                                    created_at: msg.created_at,
+                                    is_self: msg.from_user_id === this.user.id
+                                });
+                            });
+                        }
                     });
                 }
             } catch (e) {
@@ -132,19 +120,30 @@ export const useMainStore = defineStore('main', {
             const { type, id } = this.currentSession;
             try {
                 if (type === 'private') {
-                    await api.sendPrivateMessage(id, content, msgType, this.token);
-                    // 乐观更新
-                    this.addMessage('private', id, {
-                        id: Date.now().toString(), // 临时ID
-                        from_user_id: this.user.id, // Backend uses from_user_id
-                        content: content,
-                        type: msgType,
-                        created_at: new Date().toISOString(),
-                        is_self: true
-                    });
+                    const res = await api.sendPrivateMessage(id, content, msgType, this.token);
+                    if (res.msg) {
+                        this.addMessage('private', id, {
+                            id: res.msg.id,
+                            from_user_id: res.msg.from_user_id,
+                            content: res.msg.content,
+                            type: msgType,
+                            created_at: res.msg.created_at,
+                            is_self: true
+                        });
+                    }
                 } else {
-                    await api.sendGroupMessage(id, content, msgType, this.token);
-                    // 群聊消息通常等待拉取或推送回显，但也可以乐观更新
+                    const res = await api.sendGroupMessage(id, content, msgType, this.token);
+                    if (res.msg) {
+                        this.addMessage('group', id, {
+                            id: res.msg.id,
+                            from_user_id: res.msg.from_user_id,
+                            group_id: res.msg.group_id,
+                            content: res.msg.content,
+                            type: msgType,
+                            created_at: res.msg.created_at,
+                            is_self: true
+                        });
+                    }
                 }
             } catch (e) {
                 console.error("Send message failed", e);
@@ -158,18 +157,18 @@ export const useMainStore = defineStore('main', {
             this.unreadCounts[key] = 0;
             
             try {
+                const msgs = this.messages[key] || [];
                 if (type === 'private') {
-                    // Find unread messages for this session
-                    const msgs = this.messages[key] || [];
-                    // Assuming message object has 'is_read' property or we just send all IDs
-                    // Since we don't track is_read locally perfectly, we might need to fetch or just send all IDs
-                    // For now, let's assume we send IDs of messages we have locally that are not from self
                     const messageIds = msgs.filter(m => !m.is_self).map(m => m.id);
                     if (messageIds.length > 0) {
-                        await api.markPrivateRead(messageIds, this.token);
+                        // New API is singular, so we loop.
+                        await Promise.all(messageIds.map(mid => api.markPrivateMessageRead(mid, this.token)));
                     }
                 } else {
-                    await api.markGroupRead(id, this.token);
+                    if (msgs.length > 0) {
+                        const lastMsg = msgs[msgs.length - 1];
+                        await api.markGroupMessageRead(id, lastMsg.id, this.token);
+                    }
                 }
             } catch (e) {
                 console.error("Mark read failed", e);
