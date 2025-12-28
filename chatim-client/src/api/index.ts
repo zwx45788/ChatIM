@@ -10,6 +10,9 @@ export const authApi = {
   },
   getCurrentUser() {
     return request.get<any, ApiResponse<User>>('/users/me')
+  },
+  logout() {
+    return request.post<any, ApiResponse>('/logout')
   }
 }
 

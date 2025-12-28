@@ -150,6 +150,24 @@ func (h *UserHandler) Login(ctx context.Context, req *pb.LoginRequest) (*pb.Logi
 		Token:   tokenString, // 👈 返回真实的 Token
 	}, nil
 }
+func (h *UserHandler) Logout(ctx context.Context, req *pb.LogoutRequest) (*pb.LogoutResponse, error) {
+	log.Printf("Received logout request for user_id: %s", req.Username)
+	// 删除 Redis 中的在线状态
+	onlineKey := "online_status:" + req.Username
+	err := h.redis.Del(ctx, onlineKey).Err()
+	if err != nil {
+		log.Printf("Error deleting online status from Redis for user %s: %v", req.Username, err)
+		return &pb.LogoutResponse{
+			Code:    -1,
+			Message: "服务内部错误",
+		}, nil
+	}
+
+	return &pb.LogoutResponse{
+		Code:    0,
+		Message: "注销成功",
+	}, nil
+}
 func (h *UserHandler) GetCurrentUser(ctx context.Context, req *pb.GetCurrentUserRequest) (*pb.GetCurrentUserResponse, error) {
 	// 👇 核心改动：从 context 中获取 Metadata
 	md, ok := metadata.FromIncomingContext(ctx)

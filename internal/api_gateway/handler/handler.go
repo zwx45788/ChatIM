@@ -268,6 +268,32 @@ func (h *UserGatewayHandler) Login(c *gin.Context) {
 
 	log.Printf("User logged in successfully")
 }
+
+// Logout 处理 POST /api/v1/logout 的请求
+func (h *UserGatewayHandler) Logout(c *gin.Context) {
+	userID, exists := middleware.GetUserIDFromContext(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User ID not found in context"})
+		return
+	}
+
+	// 调用 gRPC 服务
+	_, err := h.userClient.Logout(c.Request.Context(), &pb.LogoutRequest{
+		Username: userID,
+	})
+	if err != nil {
+		// 即使后端登出失败，前端通常也应该视为成功（清除本地token）
+		// 但这里我们还是记录一下错误
+		log.Printf("Failed to logout user %s: %v", userID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to logout"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Logged out successfully",
+	})
+}
+
 func (h *UserGatewayHandler) GetCurrentUser(c *gin.Context) {
 	userID, exists := middleware.GetUserIDFromContext(c)
 	if !exists {
@@ -403,6 +429,7 @@ func (h *UserGatewayHandler) PullMessage(c *gin.Context) {
 	limitStr := c.DefaultQuery("limit", "20")
 	autoMarkStr := c.DefaultQuery("auto_mark", "false")
 	includeReadStr := c.DefaultQuery("include_read", "false")
+	fromStreamId := c.Query("from_stream_id")
 
 	limit, err := strconv.ParseInt(limitStr, 10, 64)
 	if err != nil {
@@ -424,9 +451,10 @@ func (h *UserGatewayHandler) PullMessage(c *gin.Context) {
 	ctx := metadata.NewOutgoingContext(c.Request.Context(), md)
 
 	req := &msgPb.PullMessagesRequest{
-		Limit:       limit,
-		AutoMark:    autoMark,
-		IncludeRead: includeRead,
+		Limit:        limit,
+		AutoMark:     autoMark,
+		IncludeRead:  includeRead,
+		FromStreamId: fromStreamId,
 	}
 
 	res, err := h.messageClient.PullMessages(ctx, req)

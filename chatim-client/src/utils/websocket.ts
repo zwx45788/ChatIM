@@ -20,6 +20,7 @@ export class WebSocketManager {
   connect(token: string) {
     this.token = token
     if (this.ws) {
+      this.ws.onclose = null
       this.ws.close()
     }
 
@@ -57,7 +58,13 @@ export class WebSocketManager {
   }
 
   disconnect() {
+    this.token = null
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
     if (this.ws) {
+      this.ws.onclose = null
       this.ws.close()
       this.ws = null
     }

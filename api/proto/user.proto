@@ -8,9 +8,11 @@ service UserService {
   rpc GetUserByID (GetUserRequest) returns (GetUserResponse) {}
   rpc CreateUser (CreateUserRequest) returns (CreateUserResponse);
   rpc Login (LoginRequest) returns (LoginResponse); // 👈 新增登录方法
+  rpc Logout(LogoutRequest) returns (LogoutResponse);
   rpc GetCurrentUser (GetCurrentUserRequest) returns (GetCurrentUserResponse);
   rpc CheckUserOnline (CheckUserOnlineRequest) returns (CheckUserOnlineResponse);
   rpc SearchUsers (SearchUsersRequest) returns (SearchUsersResponse); // 👈 搜索用户
+  
 }
 
 message GetUserRequest {
@@ -45,6 +47,14 @@ message LoginResponse {
   int32 code = 1;        // 0 成功, -1 失败
   string message = 2;     // 提示信息
   string token = 3;      // JWT Token, 如果成功
+}
+message LogoutRequest {
+  string username = 1;
+}
+
+message LogoutResponse {
+  int32 code = 1;        // 0 成功, -1 失败
+  string message = 2;     // 提示信息
 }
 message GetCurrentUserRequest {
 }

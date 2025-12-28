@@ -135,6 +135,7 @@ func main() {
 		protected := api.Group("/")
 		protected.Use(middleware.AuthMiddleware()) // 👈 应用认证中间件
 		{
+			protected.POST("/logout", userHandler.Logout)          // 👈 注册 Logout 路由
 			protected.GET("/users/me", userHandler.GetCurrentUser) // 👈 获取当前用户信息
 			// 以后其他需要认证的路由都加在这里
 			// protected.PUT("/users/me", userHandler.UpdateCurrentUser)

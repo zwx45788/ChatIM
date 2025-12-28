@@ -38,13 +38,13 @@ const router = useRouter()
 
 onMounted(() => {
   if (userStore.token) {
-    wsManager.connect(userStore.token)
+    // wsManager.connect(userStore.token) // Handled by App.vue
     userStore.fetchCurrentUser()
   }
 })
 
 const handleLogout = () => {
-  wsManager.disconnect()
+  // wsManager.disconnect() // 不需要手动断开了，App.vue 会自动处理
   userStore.logout()
   router.push('/login')
 }

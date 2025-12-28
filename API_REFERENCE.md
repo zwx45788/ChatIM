@@ -49,7 +49,24 @@ Response:
 
 > **注意**：登录后前端应主动调用 `GET /messages` 拉取未读消息。
 
-### 1.3 获取当前用户信息
+### 1.3 用户登出
+```
+POST /logout
+Content-Type: application/json
+
+Request:
+{
+  "username": "string"
+}
+
+Response:
+{
+  "code": 0,
+  "message": "string"
+}
+```
+
+### 1.4 获取当前用户信息
 ```
 GET /users/me
 Authorization: Bearer {token}
@@ -66,7 +83,7 @@ Response:
 }
 ```
 
-### 1.4 获取用户详情
+### 1.5 获取用户详情
 ```
 GET /users/{user_id}
 
@@ -82,7 +99,7 @@ Response:
 }
 ```
 
-### 1.5 检查用户在线状态
+### 1.6 检查用户在线状态
 ```
 GET /users/{user_id}/online
 

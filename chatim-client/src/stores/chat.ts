@@ -315,6 +315,13 @@ export const useChatStore = defineStore('chat', () => {
 
         // 计算总未读数（完全由前端维护，不使用后端返回值）
         unreadCount.value = conversations.value.reduce((sum, c) => sum + (c.unread_count || 0), 0)
+
+        // 同步完成后，上报最新的 stream_id 给服务端，避免下次重复拉取
+        if (lastStreamId.value && lastStreamId.value !== '0-0') {
+          messageApi.updateLastSeenCursor({
+            last_seen_stream_id: lastStreamId.value
+          }).catch(e => console.error('Failed to update last seen cursor', e))
+        }
       }
     } catch (e) {
       console.error('Failed to sync messages', e)
